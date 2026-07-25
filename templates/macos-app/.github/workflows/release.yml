@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*-build.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, such as v1.0-build.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.0.0
+    with:
+      app_name: "__APP_NAME__"
+      project_path: "__PROJECT_PATH__"
+      scheme: "__SCHEME__"
+      expected_bundle_id: "__BUNDLE_ID__"
+      release_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      apple_team_id: ${{ vars.APPLE_TEAM_ID }}
+    secrets:
+      developer_id_certificate_base64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+      developer_id_certificate_password: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      app_store_connect_key_id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      app_store_connect_issuer_id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      app_store_connect_private_key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}

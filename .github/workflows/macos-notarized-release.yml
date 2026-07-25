@@ -1,0 +1,489 @@
+name: Notarized macOS Release
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: "User-facing app name and exported .app name"
+        required: true
+        type: string
+      project_path:
+        description: "Path to the caller's .xcodeproj or .xcworkspace"
+        required: true
+        type: string
+      scheme:
+        description: "Shared archive scheme"
+        required: true
+        type: string
+      expected_bundle_id:
+        description: "Expected PRODUCT_BUNDLE_IDENTIFIER"
+        required: true
+        type: string
+      release_tag:
+        description: "Existing tag in vMARKETING_VERSION-build.CURRENT_PROJECT_VERSION format"
+        required: true
+        type: string
+      apple_team_id:
+        description: "Apple Developer team identifier"
+        required: true
+        type: string
+      configuration:
+        description: "Xcode build configuration"
+        required: false
+        default: Release
+        type: string
+      runner:
+        description: "GitHub-hosted macOS runner label"
+        required: false
+        default: macos-26
+        type: string
+      xcode_path:
+        description: "Optional Xcode.app path passed to xcode-select"
+        required: false
+        default: ""
+        type: string
+      minimum_xcode_major:
+        description: "Minimum accepted Xcode major version"
+        required: false
+        default: 26
+        type: number
+      release_notes_path:
+        description: "Optional user-facing release notes file in the caller repository"
+        required: false
+        default: .github/release-notes.md
+        type: string
+    secrets:
+      developer_id_certificate_base64:
+        description: "Base64-encoded Developer ID Application .p12"
+        required: true
+      developer_id_certificate_password:
+        description: "Password used when exporting the .p12"
+        required: true
+      app_store_connect_key_id:
+        description: "App Store Connect API key identifier"
+        required: true
+      app_store_connect_issuer_id:
+        description: "App Store Connect API issuer identifier"
+        required: true
+      app_store_connect_private_key:
+        description: "Complete App Store Connect AuthKey .p8 content"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, notarize, and publish
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+    concurrency:
+      group: notarized-release-${{ github.repository }}-${{ inputs.release_tag }}
+      cancel-in-progress: false
+    env:
+      APP_NAME: ${{ inputs.app_name }}
+      PROJECT_PATH: ${{ inputs.project_path }}
+      SCHEME: ${{ inputs.scheme }}
+      EXPECTED_BUNDLE_ID: ${{ inputs.expected_bundle_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+      CONFIGURATION: ${{ inputs.configuration }}
+      XCODE_PATH: ${{ inputs.xcode_path }}
+      MINIMUM_XCODE_MAJOR: ${{ inputs.minimum_xcode_major }}
+      RELEASE_NOTES_PATH: ${{ inputs.release_notes_path }}
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag }}
+
+      - name: Validate release inputs and project metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for variable_name in APP_NAME PROJECT_PATH SCHEME EXPECTED_BUNDLE_ID RELEASE_TAG APPLE_TEAM_ID; do
+            if [[ -z "${!variable_name}" ]]; then
+              echo "$variable_name is required." >&2
+              exit 1
+            fi
+          done
+
+          if [[ ! "$RELEASE_TAG" =~ ^v(.+)-build\.([0-9]+)$ ]]; then
+            echo "Release tag must match vMARKETING_VERSION-build.CURRENT_PROJECT_VERSION." >&2
+            exit 1
+          fi
+
+          if [[ ! -e "$PROJECT_PATH" ]]; then
+            echo "Xcode project or workspace not found: $PROJECT_PATH" >&2
+            exit 1
+          fi
+
+          case "$PROJECT_PATH" in
+            *.xcodeproj)
+              container_flag="-project"
+              ;;
+            *.xcworkspace)
+              container_flag="-workspace"
+              ;;
+            *)
+              echo "project_path must end in .xcodeproj or .xcworkspace." >&2
+              exit 1
+              ;;
+          esac
+
+          if ! find . -path "*/xcshareddata/xcschemes/$SCHEME.xcscheme" -print -quit | grep -q .; then
+            echo "Shared scheme not found: $SCHEME.xcscheme" >&2
+            echo "Mark the scheme as Shared in Xcode and commit it before releasing." >&2
+            exit 1
+          fi
+
+          if [[ -n "$XCODE_PATH" ]]; then
+            if [[ ! -d "$XCODE_PATH" ]]; then
+              echo "Configured Xcode path does not exist: $XCODE_PATH" >&2
+              exit 1
+            fi
+            sudo xcode-select --switch "$XCODE_PATH"
+          fi
+
+          xcodebuild -version
+          xcode_major="$(xcodebuild -version | awk '/^Xcode / { split($2, parts, "."); print parts[1]; exit }')"
+          if [[ -z "$xcode_major" || "$xcode_major" -lt "$MINIMUM_XCODE_MAJOR" ]]; then
+            echo "Xcode $MINIMUM_XCODE_MAJOR or newer is required; found ${xcode_major:-unknown}." >&2
+            exit 1
+          fi
+
+          tag_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [[ "$tag_commit" != "$head_commit" ]]; then
+            echo "Checked-out commit does not match tag $RELEASE_TAG." >&2
+            exit 1
+          fi
+
+          build_settings="$RUNNER_TEMP/build-settings.txt"
+          xcodebuild \
+            "$container_flag" "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -showBuildSettings > "$build_settings"
+
+          read_setting() {
+            local key="$1"
+            awk -F ' = ' -v key="$key" \
+              '$1 ~ ("^[[:space:]]*" key "$") { print $2; exit }' \
+              "$build_settings"
+          }
+
+          marketing_version="$(read_setting MARKETING_VERSION)"
+          project_version="$(read_setting CURRENT_PROJECT_VERSION)"
+          bundle_id="$(read_setting PRODUCT_BUNDLE_IDENTIFIER)"
+          full_product_name="$(read_setting FULL_PRODUCT_NAME)"
+
+          if [[ -z "$marketing_version" || -z "$project_version" || -z "$bundle_id" || -z "$full_product_name" ]]; then
+            echo "Could not resolve release metadata from Xcode build settings." >&2
+            exit 1
+          fi
+
+          expected_tag="v${marketing_version}-build.${project_version}"
+          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
+            echo "Tag mismatch: expected $expected_tag from Xcode build settings, received $RELEASE_TAG." >&2
+            exit 1
+          fi
+
+          if [[ "$bundle_id" != "$EXPECTED_BUNDLE_ID" ]]; then
+            echo "Bundle identifier mismatch: expected $EXPECTED_BUNDLE_ID, resolved $bundle_id." >&2
+            exit 1
+          fi
+
+          if [[ "$full_product_name" != "$APP_NAME.app" ]]; then
+            echo "Exported product mismatch: expected $APP_NAME.app, resolved $full_product_name." >&2
+            exit 1
+          fi
+
+          asset_stem="$(printf '%s' "$APP_NAME" | tr ' ' '-' | tr -cd '[:alnum:]_.-')"
+          if [[ -z "$asset_stem" ]]; then
+            echo "App name did not produce a valid release asset name." >&2
+            exit 1
+          fi
+
+          {
+            echo "XCODE_CONTAINER_FLAG=$container_flag"
+            echo "MARKETING_VERSION=$marketing_version"
+            echo "CURRENT_PROJECT_VERSION=$project_version"
+            echo "APP_BUNDLE_NAME=$full_product_name"
+            echo "ASSET_STEM=$asset_stem"
+          } >> "$GITHUB_ENV"
+
+      - name: Import Developer ID certificate
+        env:
+          DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.developer_id_certificate_base64 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.developer_id_certificate_password }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DEVELOPER_ID_CERTIFICATE_BASE64" || -z "$DEVELOPER_ID_CERTIFICATE_PASSWORD" ]]; then
+            echo "Developer ID certificate credentials are required." >&2
+            exit 1
+          fi
+
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/app-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$DEVELOPER_ID_CERTIFICATE_BASE64" | base64 --decode -o "$certificate_path"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+
+          security find-identity -v -p codesigning "$keychain_path"
+
+          {
+            echo "SIGNING_KEYCHAIN_PATH=$keychain_path"
+            echo "SIGNING_KEYCHAIN_PASSWORD=$keychain_password"
+            echo "CERTIFICATE_PATH=$certificate_path"
+          } >> "$GITHUB_ENV"
+
+      - name: Archive and export Developer ID app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          build_root="$RUNNER_TEMP/notarized-release"
+          archive_path="$build_root/$ASSET_STEM.xcarchive"
+          export_path="$build_root/export"
+          export_options="$build_root/ExportOptions-DeveloperID.plist"
+
+          rm -rf "$build_root"
+          mkdir -p "$build_root"
+
+          cat > "$export_options" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>destination</key>
+            <string>export</string>
+            <key>method</key>
+            <string>developer-id</string>
+            <key>signingCertificate</key>
+            <string>Developer ID Application</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>teamID</key>
+            <string>$APPLE_TEAM_ID</string>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild archive \
+            "$XCODE_CONTAINER_FLAG" "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -destination "generic/platform=macOS" \
+            -derivedDataPath "$build_root/DerivedData" \
+            -archivePath "$archive_path" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp"
+
+          xcodebuild -exportArchive \
+            -archivePath "$archive_path" \
+            -exportPath "$export_path" \
+            -exportOptionsPlist "$export_options"
+
+          app_path="$export_path/$APP_BUNDLE_NAME"
+          if [[ ! -d "$app_path" ]]; then
+            echo "Expected exported app at $app_path." >&2
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          signature_details="$(codesign --display --verbose=4 "$app_path" 2>&1)"
+          printf '%s\n' "$signature_details"
+
+          if ! grep -q "runtime" <<< "$signature_details"; then
+            echo "Exported app is missing the Hardened Runtime signature flag." >&2
+            exit 1
+          fi
+
+          {
+            echo "BUILD_ROOT=$build_root"
+            echo "ARCHIVE_PATH=$archive_path"
+            echo "EXPORT_PATH=$export_path"
+            echo "APP_PATH=$app_path"
+          } >> "$GITHUB_ENV"
+
+      - name: Submit to Apple notarization service
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.app_store_connect_key_id }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.app_store_connect_issuer_id }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.app_store_connect_private_key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for variable_name in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_PRIVATE_KEY; do
+            if [[ -z "${!variable_name}" ]]; then
+              echo "$variable_name is required. Release workflows do not permit unsigned notarization skips." >&2
+              exit 1
+            fi
+          done
+
+          private_key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          notary_zip="$BUILD_ROOT/$ASSET_STEM-notary.zip"
+          notary_result="$RUNNER_TEMP/notary-result.json"
+          notary_log="$RUNNER_TEMP/notary-log.json"
+
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$private_key_path"
+          chmod 600 "$private_key_path"
+          ditto -c -k --keepParent "$APP_PATH" "$notary_zip"
+
+          set +e
+          xcrun notarytool submit "$notary_zip" \
+            --key "$private_key_path" \
+            --key-id "$APP_STORE_CONNECT_KEY_ID" \
+            --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --wait \
+            --output-format json > "$notary_result"
+          submit_status=$?
+          set -e
+
+          cat "$notary_result"
+
+          notarization_status="$(plutil -extract status raw "$notary_result" 2>/dev/null || true)"
+          submission_id="$(plutil -extract id raw "$notary_result" 2>/dev/null || true)"
+
+          if [[ "$submit_status" -ne 0 || "$notarization_status" != "Accepted" ]]; then
+            if [[ -n "$submission_id" ]]; then
+              xcrun notarytool log "$submission_id" \
+                --key "$private_key_path" \
+                --key-id "$APP_STORE_CONNECT_KEY_ID" \
+                --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
+                "$notary_log" || true
+              if [[ -f "$notary_log" ]]; then
+                cat "$notary_log"
+              fi
+            fi
+            echo "Apple notarization was not accepted." >&2
+            exit 1
+          fi
+
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+          spctl --assess --type execute --verbose=4 "$APP_PATH"
+
+          {
+            echo "APP_STORE_CONNECT_PRIVATE_KEY_PATH=$private_key_path"
+            echo "NOTARY_ZIP=$notary_zip"
+            echo "NOTARY_SUBMISSION_ID=$submission_id"
+          } >> "$GITHUB_ENV"
+
+      - name: Package notarized app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_asset="$BUILD_ROOT/$ASSET_STEM-$RELEASE_TAG.zip"
+          checksum_path="$release_asset.sha256"
+
+          ditto -c -k --keepParent "$APP_PATH" "$release_asset"
+          (
+            cd "$(dirname "$release_asset")"
+            shasum -a 256 "$(basename "$release_asset")" > "$(basename "$checksum_path")"
+          )
+
+          {
+            echo "RELEASE_ASSET=$release_asset"
+            echo "CHECKSUM_PATH=$checksum_path"
+          } >> "$GITHUB_ENV"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_title="$APP_NAME $MARKETING_VERSION"
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "$RELEASE_ASSET" \
+              "$CHECKSUM_PATH" \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+
+            if [[ -f "$RELEASE_NOTES_PATH" ]]; then
+              gh release edit "$RELEASE_TAG" \
+                --title "$release_title" \
+                --notes-file "$RELEASE_NOTES_PATH" \
+                --repo "$GITHUB_REPOSITORY"
+            else
+              gh release edit "$RELEASE_TAG" \
+                --title "$release_title" \
+                --repo "$GITHUB_REPOSITORY"
+            fi
+          else
+            if [[ -f "$RELEASE_NOTES_PATH" ]]; then
+              gh release create "$RELEASE_TAG" \
+                "$RELEASE_ASSET" \
+                "$CHECKSUM_PATH" \
+                --title "$release_title" \
+                --notes-file "$RELEASE_NOTES_PATH" \
+                --verify-tag \
+                --repo "$GITHUB_REPOSITORY"
+            else
+              gh release create "$RELEASE_TAG" \
+                "$RELEASE_ASSET" \
+                "$CHECKSUM_PATH" \
+                --title "$release_title" \
+                --generate-notes \
+                --verify-tag \
+                --repo "$GITHUB_REPOSITORY"
+            fi
+          fi
+
+          {
+            echo "## $release_title"
+            echo
+            echo "- Tag: \`$RELEASE_TAG\`"
+            echo "- Bundle ID: \`$EXPECTED_BUNDLE_ID\`"
+            echo "- Notarization: \`$NOTARY_SUBMISSION_ID\`"
+            echo "- Asset: \`$(basename "$RELEASE_ASSET")\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove temporary credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set +e
+
+          if [[ -n "${SIGNING_KEYCHAIN_PATH:-}" && -f "$SIGNING_KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$SIGNING_KEYCHAIN_PATH"
+          fi
+
+          rm -f \
+            "${CERTIFICATE_PATH:-}" \
+            "${APP_STORE_CONNECT_PRIVATE_KEY_PATH:-}" \
+            "$RUNNER_TEMP"/AuthKey_*.p8

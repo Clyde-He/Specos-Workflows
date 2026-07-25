@@ -1,0 +1,53 @@
+name: Validate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tooling:
+    name: Tooling
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r -d '' script_path; do
+            bash -n "$script_path"
+          done < <(find scripts templates -name '*.sh' -print0)
+
+      - name: Generate macOS app template
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          destination="$RUNNER_TEMP/Example-App"
+          ./scripts/new-macos-app.sh \
+            --name "Example App" \
+            --bundle-id "design.specos.example" \
+            --destination "$destination"
+
+          test -d "$destination/.git"
+          test -f "$destination/AGENTS.md"
+          test -f "$destination/.gitignore"
+          test -f "$destination/.github/workflows/release.yml"
+          test ! -e "$destination/.github/workflows/macos-notarized-release.yml"
+
+          grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.0.0" \
+            "$destination/.github/workflows/release.yml"
+          grep -q "design.specos.example" "$destination/AGENTS.md"
