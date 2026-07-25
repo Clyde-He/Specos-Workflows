@@ -10,9 +10,13 @@ gh auth status
 
 repository=""
 configure_swift_package_token=false
+configure_apple_development_certificate=false
 
 for argument in "$@"; do
   case "$argument" in
+    --with-apple-development-certificate)
+      configure_apple_development_certificate=true
+      ;;
     --with-swift-package-token)
       configure_swift_package_token=true
       ;;
@@ -41,6 +45,13 @@ read -r -p "App Store Connect AuthKey .p8 path: " private_key_path
 read -r -p "App Store Connect key ID: " key_id
 read -r -p "App Store Connect issuer ID: " issuer_id
 read -r -p "Apple Developer team ID: " team_id
+development_certificate_path=""
+development_certificate_password=""
+if [[ "$configure_apple_development_certificate" == "true" ]]; then
+  read -r -p "Apple Development .p12 path: " development_certificate_path
+  read -r -s -p "Apple Development .p12 password: " development_certificate_password
+  echo
+fi
 swift_package_token=""
 if [[ "$configure_swift_package_token" == "true" ]]; then
   read -r -s -p "Private Swift package token: " swift_package_token
@@ -57,6 +68,11 @@ if [[ ! -f "$private_key_path" ]]; then
   exit 1
 fi
 
+if [[ "$configure_apple_development_certificate" == "true" && ! -f "$development_certificate_path" ]]; then
+  echo "Apple Development certificate not found: $development_certificate_path" >&2
+  exit 1
+fi
+
 if [[ -z "$certificate_password" || -z "$key_id" || -z "$issuer_id" || -z "$team_id" ]]; then
   echo "All credential values are required." >&2
   exit 1
@@ -64,6 +80,11 @@ fi
 
 if [[ "$configure_swift_package_token" == "true" && -z "$swift_package_token" ]]; then
   echo "The private Swift package token is required when requested." >&2
+  exit 1
+fi
+
+if [[ "$configure_apple_development_certificate" == "true" && -z "$development_certificate_password" ]]; then
+  echo "The Apple Development certificate password is required when requested." >&2
   exit 1
 fi
 
@@ -77,6 +98,13 @@ printf '%s' "$key_id" |
 printf '%s' "$issuer_id" |
   gh secret set APP_STORE_CONNECT_ISSUER_ID --repo "$repository"
 gh variable set APPLE_TEAM_ID --body "$team_id" --repo "$repository"
+
+if [[ "$configure_apple_development_certificate" == "true" ]]; then
+  base64 < "$development_certificate_path" |
+    gh secret set APPLE_DEVELOPMENT_CERTIFICATE_BASE64 --repo "$repository"
+  printf '%s' "$development_certificate_password" |
+    gh secret set APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD --repo "$repository"
+fi
 
 if [[ "$configure_swift_package_token" == "true" ]]; then
   printf '%s' "$swift_package_token" |

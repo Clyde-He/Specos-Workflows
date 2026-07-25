@@ -64,6 +64,12 @@ on:
       developer_id_certificate_password:
         description: "Password used when exporting the .p12"
         required: true
+      apple_development_certificate_base64:
+        description: "Optional base64-encoded Apple Development .p12 for development-signed archives"
+        required: false
+      apple_development_certificate_password:
+        description: "Password used when exporting the optional Apple Development .p12"
+        required: false
       app_store_connect_key_id:
         description: "App Store Connect API key identifier"
         required: true
@@ -243,10 +249,12 @@ jobs:
             echo "ASSET_STEM=$asset_stem"
           } >> "$GITHUB_ENV"
 
-      - name: Import Developer ID certificate
+      - name: Import signing certificates
         env:
           DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.developer_id_certificate_base64 }}
           DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.developer_id_certificate_password }}
+          APPLE_DEVELOPMENT_CERTIFICATE_BASE64: ${{ secrets.apple_development_certificate_base64 }}
+          APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD: ${{ secrets.apple_development_certificate_password }}
         shell: bash
         run: |
           set -euo pipefail
@@ -257,11 +265,23 @@ jobs:
           fi
 
           certificate_path="$RUNNER_TEMP/developer-id.p12"
+          development_certificate_path=""
           keychain_path="$RUNNER_TEMP/app-signing.keychain-db"
           keychain_password="$(openssl rand -hex 32)"
 
           echo "::add-mask::$keychain_password"
           printf '%s' "$DEVELOPER_ID_CERTIFICATE_BASE64" | base64 --decode -o "$certificate_path"
+
+          if [[ "$ALLOW_PROVISIONING_UPDATES" == "true" ]]; then
+            if [[ -z "$APPLE_DEVELOPMENT_CERTIFICATE_BASE64" || -z "$APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD" ]]; then
+              echo "Apple Development certificate credentials are required when allow_provisioning_updates is enabled." >&2
+              exit 1
+            fi
+
+            development_certificate_path="$RUNNER_TEMP/apple-development.p12"
+            printf '%s' "$APPLE_DEVELOPMENT_CERTIFICATE_BASE64" |
+              base64 --decode -o "$development_certificate_path"
+          fi
 
           security create-keychain -p "$keychain_password" "$keychain_path"
           security set-keychain-settings -lut 21600 "$keychain_path"
@@ -272,6 +292,16 @@ jobs:
             -t cert \
             -f pkcs12 \
             -k "$keychain_path"
+
+          if [[ -n "$development_certificate_path" ]]; then
+            security import "$development_certificate_path" \
+              -P "$APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD" \
+              -A \
+              -t cert \
+              -f pkcs12 \
+              -k "$keychain_path"
+          fi
+
           security list-keychains -d user -s "$keychain_path"
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
@@ -286,6 +316,10 @@ jobs:
             echo "SIGNING_KEYCHAIN_PASSWORD=$keychain_password"
             echo "CERTIFICATE_PATH=$certificate_path"
           } >> "$GITHUB_ENV"
+
+          if [[ -n "$development_certificate_path" ]]; then
+            echo "APPLE_DEVELOPMENT_CERTIFICATE_PATH=$development_certificate_path" >> "$GITHUB_ENV"
+          fi
 
       - name: Prepare App Store Connect authentication key
         env:
@@ -566,6 +600,7 @@ jobs:
 
           rm -f \
             "${CERTIFICATE_PATH:-}" \
+            "${APPLE_DEVELOPMENT_CERTIFICATE_PATH:-}" \
             "${APP_STORE_CONNECT_PRIVATE_KEY_PATH:-}" \
             "$RUNNER_TEMP"/AuthKey_*.p8 \
             "${GIT_CONFIG_GLOBAL:-}"

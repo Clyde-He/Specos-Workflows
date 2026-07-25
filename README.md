@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.1.1
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.2.0
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
@@ -43,6 +43,8 @@ jobs:
     secrets:
       developer_id_certificate_base64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
       developer_id_certificate_password: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      apple_development_certificate_base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_BASE64 }}
+      apple_development_certificate_password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
       app_store_connect_key_id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       app_store_connect_issuer_id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       app_store_connect_private_key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
@@ -59,9 +61,11 @@ as App Groups, should also set:
       allow_provisioning_updates: true
 ```
 
-The workflow then uses the App Store Connect authentication key to let Xcode
-create or download the required profiles during archive and export. Callers
-without those capabilities keep the default manual-signing path.
+The workflow then uses an Apple Development identity to create the
+development-signed archive and the App Store Connect authentication key to let
+Xcode create or download the required profiles. Xcode exports that archive with
+the Developer ID identity. Callers without those capabilities keep the default
+manual-signing path.
 
 ### Caller configuration
 
@@ -81,6 +85,18 @@ Configure them interactively from a trusted local checkout:
 
 ```bash
 ./scripts/configure-release-secrets.sh Clyde-He/Example-App
+```
+
+For apps that enable `allow_provisioning_updates`, also configure:
+
+- `APPLE_DEVELOPMENT_CERTIFICATE_BASE64`
+- `APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD`
+
+Pass the corresponding `.p12` to the setup helper:
+
+```bash
+./scripts/configure-release-secrets.sh Clyde-He/Example-App \
+  --with-apple-development-certificate
 ```
 
 If the caller resolves private Swift packages over HTTPS, also pass the
@@ -105,7 +121,7 @@ Contents access.
 - The archive scheme is shared and committed.
 - The Release configuration enables Hardened Runtime.
 - Apps that require Developer ID provisioning profiles enable
-  `allow_provisioning_updates`.
+  `allow_provisioning_updates` and provide an Apple Development identity.
 - Tags use `vMARKETING_VERSION-build.CURRENT_PROJECT_VERSION`.
 - The tag exists and points to the commit being built.
 - Missing credentials, invalid metadata, an invalid signature, or rejected notarization stops publication.

@@ -6,6 +6,12 @@ Export the Developer ID Application certificate and private key from Keychain Ac
 
 The workflow creates an isolated temporary keychain with a randomly generated password. A shared `BUILD_KEYCHAIN_PASSWORD` secret is not required.
 
+Apps with capabilities that require provisioning profiles, such as App Groups,
+also need an Apple Development certificate and private key for the
+development-signed archive. Export that identity as a password-protected
+`.p12`, then store it in `APPLE_DEVELOPMENT_CERTIFICATE_BASE64` and
+`APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD`.
+
 ## Notarization key
 
 Create an App Store Connect API key that can submit software to the Apple notary service. Configure its key ID and issuer ID as repository secrets, and store the complete `.p8` content in `APP_STORE_CONNECT_PRIVATE_KEY`.
@@ -38,11 +44,12 @@ file and removes it after the release job.
 1. Confirm that the app's archive scheme is shared and committed.
 2. If the app uses capabilities that require Developer ID provisioning
    profiles, such as App Groups, set `allow_provisioning_updates: true` in the
-   caller workflow. The App Store Connect API key must have access to
-   Certificates, Identifiers & Profiles.
+   caller workflow, pass the Apple Development certificate secrets, and ensure
+   the App Store Connect API key has access to Certificates, Identifiers &
+   Profiles.
 3. Add the thin caller workflow.
 4. Configure the variable and secrets.
-5. Publish this repository and push a versioned workflow tag, such as `v1.1.1`.
+5. Publish this repository and push a versioned workflow tag, such as `v1.2.0`.
 6. Reference that immutable version from a test caller.
 7. After a successful signed and notarized test release, update the moving `v1` tag if desired.
 
