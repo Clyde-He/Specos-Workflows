@@ -47,6 +47,11 @@ on:
         required: false
         default: 26
         type: number
+      allow_provisioning_updates:
+        description: "Let Xcode create or download Developer ID provisioning profiles"
+        required: false
+        default: false
+        type: boolean
       release_notes_path:
         description: "Optional user-facing release notes file in the caller repository"
         required: false
@@ -68,6 +73,9 @@ on:
       app_store_connect_private_key:
         description: "Complete App Store Connect AuthKey .p8 content"
         required: true
+      swift_package_token:
+        description: "Optional token with read access to private Swift package repositories"
+        required: false
 
 permissions:
   contents: write
@@ -90,6 +98,7 @@ jobs:
       CONFIGURATION: ${{ inputs.configuration }}
       XCODE_PATH: ${{ inputs.xcode_path }}
       MINIMUM_XCODE_MAJOR: ${{ inputs.minimum_xcode_major }}
+      ALLOW_PROVISIONING_UPDATES: ${{ inputs.allow_provisioning_updates }}
       RELEASE_NOTES_PATH: ${{ inputs.release_notes_path }}
 
     steps:
@@ -98,6 +107,20 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.release_tag }}
+
+      - name: Configure private Swift package access
+        if: ${{ secrets.swift_package_token != '' }}
+        env:
+          SWIFT_PACKAGE_TOKEN: ${{ secrets.swift_package_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git_config_global="$RUNNER_TEMP/specos-release.gitconfig"
+          GIT_CONFIG_GLOBAL="$git_config_global" git config --global \
+            url."https://x-access-token:${SWIFT_PACKAGE_TOKEN}@github.com/".insteadOf \
+            "https://github.com/"
+          echo "GIT_CONFIG_GLOBAL=$git_config_global" >> "$GITHUB_ENV"
 
       - name: Validate release inputs and project metadata
         shell: bash
@@ -261,7 +284,32 @@ jobs:
             echo "CERTIFICATE_PATH=$certificate_path"
           } >> "$GITHUB_ENV"
 
+      - name: Prepare App Store Connect authentication key
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.app_store_connect_key_id }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.app_store_connect_issuer_id }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.app_store_connect_private_key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for variable_name in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_PRIVATE_KEY; do
+            if [[ -z "${!variable_name}" ]]; then
+              echo "$variable_name is required. Release workflows do not permit unsigned notarization skips." >&2
+              exit 1
+            fi
+          done
+
+          private_key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$private_key_path"
+          chmod 600 "$private_key_path"
+
+          echo "APP_STORE_CONNECT_PRIVATE_KEY_PATH=$private_key_path" >> "$GITHUB_ENV"
+
       - name: Archive and export Developer ID app
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.app_store_connect_key_id }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.app_store_connect_issuer_id }}
         shell: bash
         run: |
           set -euo pipefail
@@ -274,6 +322,33 @@ jobs:
           rm -rf "$build_root"
           mkdir -p "$build_root"
 
+          export_signing_style="manual"
+          signing_certificate_plist=$'            <key>signingCertificate</key>\n            <string>Developer ID Application</string>'
+          provisioning_arguments=()
+          signing_arguments=(
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+            CODE_SIGN_STYLE=Manual
+            CODE_SIGN_IDENTITY="Developer ID Application"
+            OTHER_CODE_SIGN_FLAGS="--timestamp"
+          )
+
+          if [[ "$ALLOW_PROVISIONING_UPDATES" == "true" ]]; then
+            export_signing_style="automatic"
+            signing_certificate_plist=""
+            provisioning_arguments=(
+              -allowProvisioningUpdates
+              -authenticationKeyPath "$APP_STORE_CONNECT_PRIVATE_KEY_PATH"
+              -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID"
+              -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+            )
+            signing_arguments=(
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+              CODE_SIGN_STYLE=Automatic
+              CODE_SIGN_IDENTITY="Developer ID Application"
+              OTHER_CODE_SIGN_FLAGS="--timestamp"
+            )
+          fi
+
           cat > "$export_options" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -283,10 +358,9 @@ jobs:
             <string>export</string>
             <key>method</key>
             <string>developer-id</string>
-            <key>signingCertificate</key>
-            <string>Developer ID Application</string>
+          $signing_certificate_plist
             <key>signingStyle</key>
-            <string>manual</string>
+            <string>$export_signing_style</string>
             <key>stripSwiftSymbols</key>
             <true/>
             <key>teamID</key>
@@ -302,15 +376,14 @@ jobs:
             -destination "generic/platform=macOS" \
             -derivedDataPath "$build_root/DerivedData" \
             -archivePath "$archive_path" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Developer ID Application" \
-            OTHER_CODE_SIGN_FLAGS="--timestamp"
+            "${provisioning_arguments[@]}" \
+            "${signing_arguments[@]}"
 
           xcodebuild -exportArchive \
             -archivePath "$archive_path" \
             -exportPath "$export_path" \
-            -exportOptionsPlist "$export_options"
+            -exportOptionsPlist "$export_options" \
+            "${provisioning_arguments[@]}"
 
           app_path="$export_path/$APP_BUNDLE_NAME"
           if [[ ! -d "$app_path" ]]; then
@@ -338,25 +411,22 @@ jobs:
         env:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.app_store_connect_key_id }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.app_store_connect_issuer_id }}
-          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.app_store_connect_private_key }}
         shell: bash
         run: |
           set -euo pipefail
 
-          for variable_name in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_PRIVATE_KEY; do
+          for variable_name in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_PRIVATE_KEY_PATH; do
             if [[ -z "${!variable_name}" ]]; then
               echo "$variable_name is required. Release workflows do not permit unsigned notarization skips." >&2
               exit 1
             fi
           done
 
-          private_key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          private_key_path="$APP_STORE_CONNECT_PRIVATE_KEY_PATH"
           notary_zip="$BUILD_ROOT/$ASSET_STEM-notary.zip"
           notary_result="$RUNNER_TEMP/notary-result.json"
           notary_log="$RUNNER_TEMP/notary-log.json"
 
-          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$private_key_path"
-          chmod 600 "$private_key_path"
           ditto -c -k --keepParent "$APP_PATH" "$notary_zip"
 
           set +e
@@ -486,4 +556,5 @@ jobs:
           rm -f \
             "${CERTIFICATE_PATH:-}" \
             "${APP_STORE_CONNECT_PRIVATE_KEY_PATH:-}" \
-            "$RUNNER_TEMP"/AuthKey_*.p8
+            "$RUNNER_TEMP"/AuthKey_*.p8 \
+            "${GIT_CONFIG_GLOBAL:-}"

@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.0.0
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.1.0
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
@@ -51,6 +51,17 @@ jobs:
 The reusable workflow checks out and releases the caller repository. It does not copy or read anything under `templates/`.
 
 The caller must grant `contents: write`; a reusable workflow cannot elevate the caller's token permissions.
+
+Apps with capabilities that require Developer ID provisioning profiles, such
+as App Groups, should also set:
+
+```yaml
+      allow_provisioning_updates: true
+```
+
+The workflow then uses the App Store Connect authentication key to let Xcode
+create or download the required profiles during archive and export. Callers
+without those capabilities keep the default manual-signing path.
 
 ### Caller configuration
 
@@ -72,10 +83,29 @@ Configure them interactively from a trusted local checkout:
 ./scripts/configure-release-secrets.sh Clyde-He/Example-App
 ```
 
+If the caller resolves private Swift packages over HTTPS, also pass the
+optional workflow secret:
+
+```yaml
+      swift_package_token: ${{ secrets.SWIFT_PACKAGE_TOKEN }}
+```
+
+Configure it together with the release credentials:
+
+```bash
+./scripts/configure-release-secrets.sh Clyde-He/Example-App \
+  --with-swift-package-token
+```
+
+Use a fine-grained token limited to the package repositories with read-only
+Contents access.
+
 ### Release contract
 
 - The archive scheme is shared and committed.
 - The Release configuration enables Hardened Runtime.
+- Apps that require Developer ID provisioning profiles enable
+  `allow_provisioning_updates`.
 - Tags use `vMARKETING_VERSION-build.CURRENT_PROJECT_VERSION`.
 - The tag exists and points to the commit being built.
 - Missing credentials, invalid metadata, an invalid signature, or rejected notarization stops publication.

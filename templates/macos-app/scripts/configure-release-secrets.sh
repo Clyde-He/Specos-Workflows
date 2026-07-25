@@ -8,7 +8,28 @@ fi
 
 gh auth status
 
-repository="${1:-}"
+repository=""
+configure_swift_package_token=false
+
+for argument in "$@"; do
+  case "$argument" in
+    --with-swift-package-token)
+      configure_swift_package_token=true
+      ;;
+    -*)
+      echo "Unknown option: $argument" >&2
+      exit 1
+      ;;
+    *)
+      if [[ -n "$repository" ]]; then
+        echo "Only one repository may be specified." >&2
+        exit 1
+      fi
+      repository="$argument"
+      ;;
+  esac
+done
+
 if [[ -z "$repository" ]]; then
   repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 fi
@@ -20,6 +41,11 @@ read -r -p "App Store Connect AuthKey .p8 path: " private_key_path
 read -r -p "App Store Connect key ID: " key_id
 read -r -p "App Store Connect issuer ID: " issuer_id
 read -r -p "Apple Developer team ID: " team_id
+swift_package_token=""
+if [[ "$configure_swift_package_token" == "true" ]]; then
+  read -r -s -p "Private Swift package token: " swift_package_token
+  echo
+fi
 
 if [[ ! -f "$certificate_path" ]]; then
   echo "Certificate not found: $certificate_path" >&2
@@ -36,6 +62,11 @@ if [[ -z "$certificate_password" || -z "$key_id" || -z "$issuer_id" || -z "$team
   exit 1
 fi
 
+if [[ "$configure_swift_package_token" == "true" && -z "$swift_package_token" ]]; then
+  echo "The private Swift package token is required when requested." >&2
+  exit 1
+fi
+
 base64 < "$certificate_path" |
   gh secret set DEVELOPER_ID_CERTIFICATE_BASE64 --repo "$repository"
 printf '%s' "$certificate_password" |
@@ -46,5 +77,10 @@ printf '%s' "$key_id" |
 printf '%s' "$issuer_id" |
   gh secret set APP_STORE_CONNECT_ISSUER_ID --repo "$repository"
 gh variable set APPLE_TEAM_ID --body "$team_id" --repo "$repository"
+
+if [[ "$configure_swift_package_token" == "true" ]]; then
+  printf '%s' "$swift_package_token" |
+    gh secret set SWIFT_PACKAGE_TOKEN --repo "$repository"
+fi
 
 echo "Configured release credentials for $repository."
