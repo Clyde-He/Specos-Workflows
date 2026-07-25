@@ -48,6 +48,6 @@ jobs:
           test -f "$destination/.github/workflows/release.yml"
           test ! -e "$destination/.github/workflows/macos-notarized-release.yml"
 
-          grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.3.0" \
+          grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.3.1" \
             "$destination/.github/workflows/release.yml"
           grep -q "design.specos.example" "$destination/AGENTS.md"

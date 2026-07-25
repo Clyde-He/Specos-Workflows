@@ -476,9 +476,11 @@ jobs:
           export_signing_style="manual"
           signing_certificate_plist=$'            <key>signingCertificate</key>\n            <string>Developer ID Application</string>'
 
-          if [[ "$ALLOW_PROVISIONING_UPDATES" == "true" && -z "${DEVELOPER_ID_PROFILE_MAPPING_PATH:-}" ]]; then
+          if [[ "$ALLOW_PROVISIONING_UPDATES" == "true" ]]; then
             export_signing_style="automatic"
-            signing_certificate_plist=""
+            if [[ -z "${DEVELOPER_ID_PROFILE_MAPPING_PATH:-}" ]]; then
+              signing_certificate_plist=""
+            fi
           fi
 
           cat > "$export_options" <<PLIST

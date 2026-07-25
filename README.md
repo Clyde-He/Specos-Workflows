@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.3.0
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.3.1
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
