@@ -52,6 +52,11 @@ on:
         required: false
         default: false
         type: boolean
+      download_metal_toolchain:
+        description: "Download Xcode's optional Metal toolchain before archiving"
+        required: false
+        default: false
+        type: boolean
       release_notes_path:
         description: "Optional user-facing release notes file in the caller repository"
         required: false
@@ -248,6 +253,13 @@ jobs:
             echo "APP_BUNDLE_NAME=$full_product_name"
             echo "ASSET_STEM=$asset_stem"
           } >> "$GITHUB_ENV"
+
+      - name: Download Metal toolchain
+        if: ${{ inputs.download_metal_toolchain }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -downloadComponent MetalToolchain
 
       - name: Import signing certificates
         env:

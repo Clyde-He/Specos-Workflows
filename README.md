@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.2.0
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.2.1
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
@@ -66,6 +66,13 @@ development-signed archive and the App Store Connect authentication key to let
 Xcode create or download the required profiles. Xcode exports that archive with
 the Developer ID identity. Callers without those capabilities keep the default
 manual-signing path.
+
+Apps that compile Metal source on runner images where the optional toolchain is
+not preinstalled should also set:
+
+```yaml
+      download_metal_toolchain: true
+```
 
 ### Caller configuration
 
