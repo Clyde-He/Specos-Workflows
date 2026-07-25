@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.2.1
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.3.0
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
@@ -45,6 +45,7 @@ jobs:
       developer_id_certificate_password: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
       apple_development_certificate_base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_BASE64 }}
       apple_development_certificate_password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+      developer_id_provisioning_profiles_base64: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILES_BASE64 }}
       app_store_connect_key_id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       app_store_connect_issuer_id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       app_store_connect_private_key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
@@ -98,13 +99,20 @@ For apps that enable `allow_provisioning_updates`, also configure:
 
 - `APPLE_DEVELOPMENT_CERTIFICATE_BASE64`
 - `APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD`
+- `DEVELOPER_ID_PROVISIONING_PROFILES_BASE64`
 
 Pass the corresponding `.p12` to the setup helper:
 
 ```bash
 ./scripts/configure-release-secrets.sh Clyde-He/Example-App \
-  --with-apple-development-certificate
+  --with-apple-development-certificate \
+  --with-developer-id-profiles
 ```
+
+Enter every Developer ID provisioning profile required by the exported app and
+its embedded extensions. The helper packs them into one compressed repository
+secret; the workflow validates and installs them, then performs a manual export
+with the caller's Developer ID certificate.
 
 If the caller resolves private Swift packages over HTTPS, also pass the
 optional workflow secret:
@@ -128,7 +136,8 @@ Contents access.
 - The archive scheme is shared and committed.
 - The Release configuration enables Hardened Runtime.
 - Apps that require Developer ID provisioning profiles enable
-  `allow_provisioning_updates` and provide an Apple Development identity.
+  `allow_provisioning_updates`, provide an Apple Development identity, and
+  provide Developer ID profiles for the app and embedded extensions.
 - Tags use `vMARKETING_VERSION-build.CURRENT_PROJECT_VERSION`.
 - The tag exists and points to the commit being built.
 - Missing credentials, invalid metadata, an invalid signature, or rejected notarization stops publication.

@@ -75,6 +75,9 @@ on:
       apple_development_certificate_password:
         description: "Password used when exporting the optional Apple Development .p12"
         required: false
+      developer_id_provisioning_profiles_base64:
+        description: "Optional base64-encoded tar.gz containing Developer ID provisioning profiles"
+        required: false
       app_store_connect_key_id:
         description: "App Store Connect API key identifier"
         required: true
@@ -333,6 +336,105 @@ jobs:
             echo "APPLE_DEVELOPMENT_CERTIFICATE_PATH=$development_certificate_path" >> "$GITHUB_ENV"
           fi
 
+      - name: Install Developer ID provisioning profiles
+        env:
+          DEVELOPER_ID_PROVISIONING_PROFILES_BASE64: ${{ secrets.developer_id_provisioning_profiles_base64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DEVELOPER_ID_PROVISIONING_PROFILES_BASE64" ]]; then
+            exit 0
+          fi
+
+          profile_archive="$RUNNER_TEMP/developer-id-profiles.tar.gz"
+          profile_extract_dir="$RUNNER_TEMP/developer-id-profiles"
+          profile_mapping="$RUNNER_TEMP/developer-id-profile-mapping.tsv"
+          profile_manifest="$RUNNER_TEMP/developer-id-profile-manifest.txt"
+          user_home="$(dscl . -read "/Users/$USER" NFSHomeDirectory | awk '{print $2}')"
+          profile_install_dir="$user_home/Library/Developer/Xcode/UserData/Provisioning Profiles"
+
+          printf '%s' "$DEVELOPER_ID_PROVISIONING_PROFILES_BASE64" |
+            base64 --decode -o "$profile_archive"
+
+          while IFS= read -r archive_member; do
+            case "$archive_member" in
+              ""|/*|../*|*/../*|*/..)
+                echo "Unsafe path in Developer ID provisioning profile archive: $archive_member" >&2
+                exit 1
+                ;;
+              *.provisionprofile|*.mobileprovision)
+                ;;
+              *)
+                echo "Unexpected file in Developer ID provisioning profile archive: $archive_member" >&2
+                exit 1
+                ;;
+            esac
+          done < <(tar -tzf "$profile_archive")
+
+          mkdir -p "$profile_extract_dir" "$profile_install_dir"
+          tar -xzf "$profile_archive" -C "$profile_extract_dir"
+          : > "$profile_mapping"
+          : > "$profile_manifest"
+
+          profile_count=0
+          while IFS= read -r -d '' profile_path; do
+            profile_count=$((profile_count + 1))
+            profile_plist="$RUNNER_TEMP/developer-id-profile-$profile_count.plist"
+            openssl smime \
+              -verify \
+              -inform der \
+              -in "$profile_path" \
+              -noverify \
+              -out "$profile_plist"
+
+            profile_uuid="$(/usr/libexec/PlistBuddy -c "Print :UUID" "$profile_plist")"
+            profile_name="$(/usr/libexec/PlistBuddy -c "Print :Name" "$profile_plist")"
+            profile_team="$(/usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" "$profile_plist")"
+            profile_app_id="$(/usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.application-identifier" "$profile_plist")"
+            provisions_all_devices="$(/usr/libexec/PlistBuddy -c "Print :ProvisionsAllDevices" "$profile_plist")"
+
+            if [[ "$profile_team" != "$APPLE_TEAM_ID" ]]; then
+              echo "Provisioning profile $profile_name belongs to team $profile_team, expected $APPLE_TEAM_ID." >&2
+              exit 1
+            fi
+
+            if [[ "$provisions_all_devices" != "true" ]]; then
+              echo "Provisioning profile $profile_name is not a Developer ID distribution profile." >&2
+              exit 1
+            fi
+
+            profile_bundle_id="${profile_app_id#"$APPLE_TEAM_ID."}"
+            if [[ "$profile_bundle_id" == "$profile_app_id" || -z "$profile_bundle_id" ]]; then
+              echo "Could not resolve a bundle identifier from provisioning profile $profile_name." >&2
+              exit 1
+            fi
+
+            if [[ "$profile_name" == *$'\t'* || "$profile_name" == *$'\n'* ]]; then
+              echo "Provisioning profile names may not contain tabs or newlines." >&2
+              exit 1
+            fi
+
+            installed_profile="$profile_install_dir/$profile_uuid.provisionprofile"
+            cp "$profile_path" "$installed_profile"
+            printf '%s\t%s\n' "$profile_bundle_id" "$profile_uuid" >> "$profile_mapping"
+            printf '%s\n' "$installed_profile" >> "$profile_manifest"
+            rm -f "$profile_plist"
+          done < <(find "$profile_extract_dir" -type f \( -name '*.provisionprofile' -o -name '*.mobileprovision' \) -print0)
+
+          if [[ "$profile_count" -eq 0 ]]; then
+            echo "Developer ID provisioning profile archive contained no profiles." >&2
+            exit 1
+          fi
+
+          {
+            echo "DEVELOPER_ID_PROFILE_ARCHIVE_PATH=$profile_archive"
+            echo "DEVELOPER_ID_PROFILE_EXTRACT_DIR=$profile_extract_dir"
+            echo "DEVELOPER_ID_PROFILE_INSTALL_DIR=$profile_install_dir"
+            echo "DEVELOPER_ID_PROFILE_MAPPING_PATH=$profile_mapping"
+            echo "DEVELOPER_ID_PROFILE_MANIFEST_PATH=$profile_manifest"
+          } >> "$GITHUB_ENV"
+
       - name: Prepare App Store Connect authentication key
         env:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.app_store_connect_key_id }}
@@ -374,7 +476,7 @@ jobs:
           export_signing_style="manual"
           signing_certificate_plist=$'            <key>signingCertificate</key>\n            <string>Developer ID Application</string>'
 
-          if [[ "$ALLOW_PROVISIONING_UPDATES" == "true" ]]; then
+          if [[ "$ALLOW_PROVISIONING_UPDATES" == "true" && -z "${DEVELOPER_ID_PROFILE_MAPPING_PATH:-}" ]]; then
             export_signing_style="automatic"
             signing_certificate_plist=""
           fi
@@ -399,6 +501,15 @@ jobs:
           </plist>
           PLIST
 
+          if [[ -n "${DEVELOPER_ID_PROFILE_MAPPING_PATH:-}" ]]; then
+            /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" "$export_options"
+            while IFS=$'\t' read -r profile_bundle_id profile_uuid; do
+              /usr/libexec/PlistBuddy \
+                -c "Add :provisioningProfiles:$profile_bundle_id string $profile_uuid" \
+                "$export_options"
+            done < "$DEVELOPER_ID_PROFILE_MAPPING_PATH"
+          fi
+
           if [[ "$ALLOW_PROVISIONING_UPDATES" == "true" ]]; then
             xcodebuild archive \
               "$XCODE_CONTAINER_FLAG" "$PROJECT_PATH" \
@@ -415,14 +526,21 @@ jobs:
               CODE_SIGN_STYLE=Automatic \
               OTHER_CODE_SIGN_FLAGS="--timestamp"
 
-            xcodebuild -exportArchive \
-              -archivePath "$archive_path" \
-              -exportPath "$export_path" \
-              -exportOptionsPlist "$export_options" \
-              -allowProvisioningUpdates \
-              -authenticationKeyPath "$APP_STORE_CONNECT_PRIVATE_KEY_PATH" \
-              -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-              -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+            if [[ -n "${DEVELOPER_ID_PROFILE_MAPPING_PATH:-}" ]]; then
+              xcodebuild -exportArchive \
+                -archivePath "$archive_path" \
+                -exportPath "$export_path" \
+                -exportOptionsPlist "$export_options"
+            else
+              xcodebuild -exportArchive \
+                -archivePath "$archive_path" \
+                -exportPath "$export_path" \
+                -exportOptionsPlist "$export_options" \
+                -allowProvisioningUpdates \
+                -authenticationKeyPath "$APP_STORE_CONNECT_PRIVATE_KEY_PATH" \
+                -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+                -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+            fi
           else
             xcodebuild archive \
               "$XCODE_CONTAINER_FLAG" "$PROJECT_PATH" \
@@ -610,9 +728,23 @@ jobs:
             security delete-keychain "$SIGNING_KEYCHAIN_PATH"
           fi
 
+          if [[ -n "${DEVELOPER_ID_PROFILE_MANIFEST_PATH:-}" && -f "$DEVELOPER_ID_PROFILE_MANIFEST_PATH" ]]; then
+            while IFS= read -r installed_profile; do
+              case "$installed_profile" in
+                "$DEVELOPER_ID_PROFILE_INSTALL_DIR"/*)
+                  rm -f "$installed_profile"
+                  ;;
+              esac
+            done < "$DEVELOPER_ID_PROFILE_MANIFEST_PATH"
+          fi
+
           rm -f \
             "${CERTIFICATE_PATH:-}" \
             "${APPLE_DEVELOPMENT_CERTIFICATE_PATH:-}" \
             "${APP_STORE_CONNECT_PRIVATE_KEY_PATH:-}" \
+            "${DEVELOPER_ID_PROFILE_ARCHIVE_PATH:-}" \
+            "${DEVELOPER_ID_PROFILE_MAPPING_PATH:-}" \
+            "${DEVELOPER_ID_PROFILE_MANIFEST_PATH:-}" \
+            "$RUNNER_TEMP"/developer-id-profile-*.plist \
             "$RUNNER_TEMP"/AuthKey_*.p8 \
             "${GIT_CONFIG_GLOBAL:-}"

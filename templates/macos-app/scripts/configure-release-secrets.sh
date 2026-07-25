@@ -11,11 +11,25 @@ gh auth status
 repository=""
 configure_swift_package_token=false
 configure_apple_development_certificate=false
+configure_developer_id_profiles=false
+profile_bundle_dir=""
+
+cleanup_profile_bundle() {
+  if [[ -n "$profile_bundle_dir" && -d "$profile_bundle_dir" ]]; then
+    find "$profile_bundle_dir" -type f -delete
+    rmdir "$profile_bundle_dir"
+  fi
+}
+
+trap cleanup_profile_bundle EXIT
 
 for argument in "$@"; do
   case "$argument" in
     --with-apple-development-certificate)
       configure_apple_development_certificate=true
+      ;;
+    --with-developer-id-profiles)
+      configure_developer_id_profiles=true
       ;;
     --with-swift-package-token)
       configure_swift_package_token=true
@@ -52,6 +66,17 @@ if [[ "$configure_apple_development_certificate" == "true" ]]; then
   read -r -s -p "Apple Development .p12 password: " development_certificate_password
   echo
 fi
+developer_id_profile_paths=()
+if [[ "$configure_developer_id_profiles" == "true" ]]; then
+  echo "Enter each Developer ID provisioning profile path, then press Return on an empty line."
+  while true; do
+    read -r -p "Developer ID provisioning profile path: " developer_id_profile_path
+    if [[ -z "$developer_id_profile_path" ]]; then
+      break
+    fi
+    developer_id_profile_paths+=("$developer_id_profile_path")
+  done
+fi
 swift_package_token=""
 if [[ "$configure_swift_package_token" == "true" ]]; then
   read -r -s -p "Private Swift package token: " swift_package_token
@@ -71,6 +96,29 @@ fi
 if [[ "$configure_apple_development_certificate" == "true" && ! -f "$development_certificate_path" ]]; then
   echo "Apple Development certificate not found: $development_certificate_path" >&2
   exit 1
+fi
+
+if [[ "$configure_developer_id_profiles" == "true" ]]; then
+  if [[ "${#developer_id_profile_paths[@]}" -eq 0 ]]; then
+    echo "At least one Developer ID provisioning profile is required when requested." >&2
+    exit 1
+  fi
+
+  for developer_id_profile_path in "${developer_id_profile_paths[@]}"; do
+    if [[ ! -f "$developer_id_profile_path" ]]; then
+      echo "Developer ID provisioning profile not found: $developer_id_profile_path" >&2
+      exit 1
+    fi
+
+    case "$developer_id_profile_path" in
+      *.provisionprofile|*.mobileprovision)
+        ;;
+      *)
+        echo "Unsupported provisioning profile extension: $developer_id_profile_path" >&2
+        exit 1
+        ;;
+    esac
+  done
 fi
 
 if [[ -z "$certificate_password" || -z "$key_id" || -z "$issuer_id" || -z "$team_id" ]]; then
@@ -104,6 +152,29 @@ if [[ "$configure_apple_development_certificate" == "true" ]]; then
     gh secret set APPLE_DEVELOPMENT_CERTIFICATE_BASE64 --repo "$repository"
   printf '%s' "$development_certificate_password" |
     gh secret set APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD --repo "$repository"
+fi
+
+if [[ "$configure_developer_id_profiles" == "true" ]]; then
+  profile_bundle_dir="$(mktemp -d)"
+  profile_archive_path="$profile_bundle_dir/developer-id-profiles.tar.gz"
+  profile_archive_members=()
+
+  for developer_id_profile_path in "${developer_id_profile_paths[@]}"; do
+    profile_name="$(basename "$developer_id_profile_path")"
+    copied_profile_path="$profile_bundle_dir/$profile_name"
+    if [[ -e "$copied_profile_path" ]]; then
+      echo "Provisioning profile filenames must be unique: $profile_name" >&2
+      exit 1
+    fi
+    cp "$developer_id_profile_path" "$copied_profile_path"
+    profile_archive_members+=("$profile_name")
+  done
+
+  tar -czf "$profile_archive_path" \
+    -C "$profile_bundle_dir" \
+    "${profile_archive_members[@]}"
+  base64 < "$profile_archive_path" |
+    gh secret set DEVELOPER_ID_PROVISIONING_PROFILES_BASE64 --repo "$repository"
 fi
 
 if [[ "$configure_swift_package_token" == "true" ]]; then

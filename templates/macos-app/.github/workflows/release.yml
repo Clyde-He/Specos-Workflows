@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.2.1
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.3.0
     with:
       app_name: "__APP_NAME__"
       project_path: "__PROJECT_PATH__"
@@ -29,6 +29,8 @@ jobs:
       developer_id_certificate_password: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
       apple_development_certificate_base64: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_BASE64 }}
       apple_development_certificate_password: ${{ secrets.APPLE_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+      developer_id_provisioning_profiles_base64: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILES_BASE64 }}
       app_store_connect_key_id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       app_store_connect_issuer_id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       app_store_connect_private_key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+      swift_package_token: ${{ secrets.SWIFT_PACKAGE_TOKEN }}
