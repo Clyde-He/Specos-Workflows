@@ -42,7 +42,7 @@ file and removes it after the release job.
    Certificates, Identifiers & Profiles.
 3. Add the thin caller workflow.
 4. Configure the variable and secrets.
-5. Publish this repository and push a versioned workflow tag, such as `v1.1.0`.
+5. Publish this repository and push a versioned workflow tag, such as `v1.1.1`.
 6. Reference that immutable version from a test caller.
 7. After a successful signed and notarized test release, update the moving `v1` tag if desired.
 

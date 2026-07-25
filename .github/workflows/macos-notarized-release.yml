@@ -109,12 +109,15 @@ jobs:
           ref: ${{ inputs.release_tag }}
 
       - name: Configure private Swift package access
-        if: ${{ secrets.swift_package_token != '' }}
         env:
           SWIFT_PACKAGE_TOKEN: ${{ secrets.swift_package_token }}
         shell: bash
         run: |
           set -euo pipefail
+
+          if [[ -z "$SWIFT_PACKAGE_TOKEN" ]]; then
+            exit 0
+          fi
 
           git_config_global="$RUNNER_TEMP/specos-release.gitconfig"
           GIT_CONFIG_GLOBAL="$git_config_global" git config --global \
