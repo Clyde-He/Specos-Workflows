@@ -327,29 +327,10 @@ jobs:
 
           export_signing_style="manual"
           signing_certificate_plist=$'            <key>signingCertificate</key>\n            <string>Developer ID Application</string>'
-          provisioning_arguments=()
-          signing_arguments=(
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
-            CODE_SIGN_STYLE=Manual
-            CODE_SIGN_IDENTITY="Developer ID Application"
-            OTHER_CODE_SIGN_FLAGS="--timestamp"
-          )
 
           if [[ "$ALLOW_PROVISIONING_UPDATES" == "true" ]]; then
             export_signing_style="automatic"
             signing_certificate_plist=""
-            provisioning_arguments=(
-              -allowProvisioningUpdates
-              -authenticationKeyPath "$APP_STORE_CONNECT_PRIVATE_KEY_PATH"
-              -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID"
-              -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
-            )
-            signing_arguments=(
-              DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
-              CODE_SIGN_STYLE=Automatic
-              CODE_SIGN_IDENTITY="Developer ID Application"
-              OTHER_CODE_SIGN_FLAGS="--timestamp"
-            )
           fi
 
           cat > "$export_options" <<PLIST
@@ -372,21 +353,48 @@ jobs:
           </plist>
           PLIST
 
-          xcodebuild archive \
-            "$XCODE_CONTAINER_FLAG" "$PROJECT_PATH" \
-            -scheme "$SCHEME" \
-            -configuration "$CONFIGURATION" \
-            -destination "generic/platform=macOS" \
-            -derivedDataPath "$build_root/DerivedData" \
-            -archivePath "$archive_path" \
-            "${provisioning_arguments[@]}" \
-            "${signing_arguments[@]}"
+          if [[ "$ALLOW_PROVISIONING_UPDATES" == "true" ]]; then
+            xcodebuild archive \
+              "$XCODE_CONTAINER_FLAG" "$PROJECT_PATH" \
+              -scheme "$SCHEME" \
+              -configuration "$CONFIGURATION" \
+              -destination "generic/platform=macOS" \
+              -derivedDataPath "$build_root/DerivedData" \
+              -archivePath "$archive_path" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$APP_STORE_CONNECT_PRIVATE_KEY_PATH" \
+              -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+              -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              CODE_SIGN_STYLE=Automatic \
+              OTHER_CODE_SIGN_FLAGS="--timestamp"
 
-          xcodebuild -exportArchive \
-            -archivePath "$archive_path" \
-            -exportPath "$export_path" \
-            -exportOptionsPlist "$export_options" \
-            "${provisioning_arguments[@]}"
+            xcodebuild -exportArchive \
+              -archivePath "$archive_path" \
+              -exportPath "$export_path" \
+              -exportOptionsPlist "$export_options" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$APP_STORE_CONNECT_PRIVATE_KEY_PATH" \
+              -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+              -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+          else
+            xcodebuild archive \
+              "$XCODE_CONTAINER_FLAG" "$PROJECT_PATH" \
+              -scheme "$SCHEME" \
+              -configuration "$CONFIGURATION" \
+              -destination "generic/platform=macOS" \
+              -derivedDataPath "$build_root/DerivedData" \
+              -archivePath "$archive_path" \
+              DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="Developer ID Application" \
+              OTHER_CODE_SIGN_FLAGS="--timestamp"
+
+            xcodebuild -exportArchive \
+              -archivePath "$archive_path" \
+              -exportPath "$export_path" \
+              -exportOptionsPlist "$export_options"
+          fi
 
           app_path="$export_path/$APP_BUNDLE_NAME"
           if [[ ! -d "$app_path" ]]; then
