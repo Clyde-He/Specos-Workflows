@@ -6,6 +6,31 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "Python 3 is required." >&2
+  exit 1
+fi
+
+# Terminal drag-and-drop quotes or escapes paths. Parse those without shell expansion,
+# while preserving an existing literal path (including hand-typed spaces).
+normalize_file_path() {
+  python3 - "$1" <<'PY'
+import os
+import shlex
+import sys
+
+path = sys.argv[1]
+if not os.path.isfile(path):
+    try:
+        parts = shlex.split(path)
+    except ValueError:
+        parts = []
+    if len(parts) == 1:
+        path = parts[0]
+sys.stdout.write(path)
+PY
+}
+
 gh auth status
 
 repository=""
@@ -53,9 +78,11 @@ if [[ -z "$repository" ]]; then
 fi
 
 read -r -p "Developer ID .p12 path: " certificate_path
+certificate_path="$(normalize_file_path "$certificate_path")"
 read -r -s -p "Developer ID .p12 password: " certificate_password
 echo
 read -r -p "App Store Connect AuthKey .p8 path: " private_key_path
+private_key_path="$(normalize_file_path "$private_key_path")"
 read -r -p "App Store Connect key ID: " key_id
 read -r -p "App Store Connect issuer ID: " issuer_id
 read -r -p "Apple Developer team ID: " team_id
@@ -63,6 +90,7 @@ development_certificate_path=""
 development_certificate_password=""
 if [[ "$configure_apple_development_certificate" == "true" ]]; then
   read -r -p "Apple Development .p12 path: " development_certificate_path
+  development_certificate_path="$(normalize_file_path "$development_certificate_path")"
   read -r -s -p "Apple Development .p12 password: " development_certificate_password
   echo
 fi
@@ -71,6 +99,7 @@ if [[ "$configure_developer_id_profiles" == "true" ]]; then
   echo "Enter each Developer ID provisioning profile path, then press Return on an empty line."
   while true; do
     read -r -p "Developer ID provisioning profile path: " developer_id_profile_path
+    developer_id_profile_path="$(normalize_file_path "$developer_id_profile_path")"
     if [[ -z "$developer_id_profile_path" ]]; then
       break
     fi

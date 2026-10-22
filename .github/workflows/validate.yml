@@ -31,6 +31,9 @@ jobs:
             bash -n "$script_path"
           done < <(find scripts templates -name '*.sh' -print0)
 
+      - name: Test release credential setup
+        run: python3 scripts/test-configure-release-secrets.py
+
       - name: Generate macOS app template
         shell: bash
         run: |
