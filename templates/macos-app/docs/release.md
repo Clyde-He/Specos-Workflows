@@ -2,6 +2,14 @@
 
 `__APP_NAME__` is distributed outside the Mac App Store with Developer ID signing, Hardened Runtime, Apple notarization, and GitHub Releases.
 
+## Prepare
+
+Merge the intended bug-fix and feature PRs first. Keep version bumps, build-number changes, and `.github/release-notes.md` out of those PRs, including separate release commits within them.
+
+Prepare a release when Clyde explicitly requests one, rather than bumping the version for each PR. A release can include multiple merged PRs. For a user-facing release, set a new `MARKETING_VERSION` and increment `CURRENT_PROJECT_VERSION`; for a build-only release, increment only `CURRENT_PROJECT_VERSION`. Update `.github/release-notes.md` with the changes being released and put the release preparation in one dedicated `chore: release vX.Y.Z` commit.
+
+A Release PR is not required by default. With explicit approval, push the standalone release commit directly to `main`. Use a separate release-only PR when branch protection requires it or Clyde requests one. The release commit must be on `main` before tagging.
+
 ## Prerequisites
 
 - The Release configuration has the intended entitlements and Hardened Runtime enabled.
@@ -13,7 +21,7 @@
 
 ## Publish
 
-Create and push a tag that exactly matches the Xcode versions:
+After explicit approval to tag and publish, create and push a tag that exactly matches the Xcode versions:
 
 ```bash
 git tag vX.Y.Z-build.N

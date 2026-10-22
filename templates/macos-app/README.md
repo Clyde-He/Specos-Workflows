@@ -20,7 +20,7 @@ Pull requests and pushes to `main` compile the Debug configuration without code 
 
 ## Release
 
-Update `.github/release-notes.md`, bump the Xcode marketing version and build number, commit the release preparation, then push a matching tag:
+After feature and bug-fix PRs have merged, prepare a requested release in a separate `chore: release vX.Y.Z` commit on `main`. Release preparation needs a separate PR only when branch protection requires one or Clyde requests it. With approval to tag and publish, push a matching tag:
 
 ```bash
 git tag vX.Y.Z-build.N

@@ -23,11 +23,13 @@
 
 ## Releases
 
-- User-facing changes require a new `MARKETING_VERSION` and an incremented `CURRENT_PROJECT_VERSION`.
-- Build-only releases increment only `CURRENT_PROJECT_VERSION`.
-- Prepare release changes in a dedicated `chore: release vX.Y.Z` commit.
+- Keep version bumps, build-number changes, and `.github/release-notes.md` out of bug-fix and feature PRs, even if they are in a separate commit within the PR.
+- Prepare a release only when Clyde explicitly requests one, after the intended bug-fix and feature PRs have merged. Multiple PRs can ship in one release; do not bump versions for each PR.
+- For a user-facing release, set a new `MARKETING_VERSION` and increment `CURRENT_PROJECT_VERSION`. For a build-only release, increment only `CURRENT_PROJECT_VERSION`.
+- Put the version/build changes and release notes in a dedicated `chore: release vX.Y.Z` commit.
+- A Release PR is not required by default. With explicit approval, push the standalone release commit directly to `main`; use a separate release-only PR when branch protection requires it or Clyde requests one.
+- Create the release tag only after the release commit is on `main` and Clyde has explicitly approved tagging and publication.
 - Release tags use `vX.Y.Z-build.N` and must match the Xcode project values.
-- Update `.github/release-notes.md` with user-facing language before tagging.
 - A tag push triggers a Developer ID-signed, notarized GitHub Release.
 
 ## Release Notes
