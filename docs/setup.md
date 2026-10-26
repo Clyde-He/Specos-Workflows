@@ -39,6 +39,39 @@ Use the setup helper's opt-in prompt:
 The workflow keeps the temporary Git URL rewrite in an isolated runner config
 file and removes it after the release job.
 
+## Sparkle updates
+
+Use one EdDSA key pair per app. Generate it from the app's resolved Sparkle
+package, and add the printed public key to the app's Info.plist as
+`SUPublicEDKey`:
+
+```bash
+generate_keys --account design.specos.example
+```
+
+Export the private key once, keep the exported file in a password manager as a
+backup, and store it as the caller's `SPARKLE_PRIVATE_KEY` secret. Losing it
+strands every installed copy on its current version:
+
+```bash
+generate_keys --account design.specos.example -x example-sparkle-private-key
+gh secret set SPARKLE_PRIVATE_KEY --repo Clyde-He/Example-App < example-sparkle-private-key
+```
+
+Delete the exported file after it is backed up.
+
+Create an R2 bucket for updates only, connect the custom domain used by
+`SUFeedURL`, and create an R2 API token with Object Read & Write limited to
+that bucket. Store the account ID, access key ID, and secret access key in
+`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. Keep personal
+or unrelated files out of the bucket, because the token can overwrite any
+object in it.
+
+Sandboxed apps also need `SUEnableInstallerLauncherService`, the
+`$(PRODUCT_BUNDLE_IDENTIFIER)-spks` and `-spki` mach-lookup exceptions, and
+either `SUEnableDownloaderService` or the network client entitlement. See
+Sparkle's sandboxing guide.
+
 ## Caller rollout
 
 1. Confirm that the app's archive scheme is shared and committed.

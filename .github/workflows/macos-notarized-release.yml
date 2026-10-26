@@ -62,6 +62,11 @@ on:
         required: false
         default: .github/release-notes.md
         type: string
+      sparkle_r2_bucket:
+        description: "Optional Cloudflare R2 bucket served at the root of the app's SUFeedURL host; when set, publishes the release to the Sparkle feed"
+        required: false
+        default: ""
+        type: string
     secrets:
       developer_id_certificate_base64:
         description: "Base64-encoded Developer ID Application .p12"
@@ -90,6 +95,18 @@ on:
       swift_package_token:
         description: "Optional token with read access to private Swift package repositories"
         required: false
+      sparkle_private_key:
+        description: "Sparkle EdDSA private key exported with generate_keys -x; required with sparkle_r2_bucket"
+        required: false
+      r2_account_id:
+        description: "Cloudflare account ID that owns the R2 bucket; required with sparkle_r2_bucket"
+        required: false
+      r2_access_key_id:
+        description: "R2 API token access key ID with Object Read & Write on the bucket; required with sparkle_r2_bucket"
+        required: false
+      r2_secret_access_key:
+        description: "R2 API token secret access key; required with sparkle_r2_bucket"
+        required: false
 
 permissions:
   contents: write
@@ -114,6 +131,7 @@ jobs:
       MINIMUM_XCODE_MAJOR: ${{ inputs.minimum_xcode_major }}
       ALLOW_PROVISIONING_UPDATES: ${{ inputs.allow_provisioning_updates }}
       RELEASE_NOTES_PATH: ${{ inputs.release_notes_path }}
+      SPARKLE_R2_BUCKET: ${{ inputs.sparkle_r2_bucket }}
 
     steps:
       - name: Checkout release tag
@@ -256,6 +274,34 @@ jobs:
             echo "APP_BUNDLE_NAME=$full_product_name"
             echo "ASSET_STEM=$asset_stem"
           } >> "$GITHUB_ENV"
+
+      - name: Validate Sparkle publishing credentials
+        if: ${{ inputs.sparkle_r2_bucket != '' }}
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.sparkle_private_key }}
+          R2_ACCOUNT_ID: ${{ secrets.r2_account_id }}
+          R2_ACCESS_KEY_ID: ${{ secrets.r2_access_key_id }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.r2_secret_access_key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for variable_name in SPARKLE_PRIVATE_KEY R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
+            if [[ -z "${!variable_name}" ]]; then
+              echo "$variable_name is required when sparkle_r2_bucket is set." >&2
+              exit 1
+            fi
+          done
+
+          if [[ ! "$SPARKLE_R2_BUCKET" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]]; then
+            echo "sparkle_r2_bucket is not a valid R2 bucket name: $SPARKLE_R2_BUCKET" >&2
+            exit 1
+          fi
+
+          if [[ ! "$R2_ACCOUNT_ID" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "r2_account_id must be a 32-character Cloudflare account ID." >&2
+            exit 1
+          fi
 
       - name: Download Metal toolchain
         if: ${{ inputs.download_metal_toolchain }}
@@ -665,6 +711,124 @@ jobs:
             echo "CHECKSUM_PATH=$checksum_path"
           } >> "$GITHUB_ENV"
 
+      - name: Generate Sparkle appcast
+        if: ${{ inputs.sparkle_r2_bucket != '' }}
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.sparkle_private_key }}
+          R2_ACCOUNT_ID: ${{ secrets.r2_account_id }}
+          R2_ACCESS_KEY_ID: ${{ secrets.r2_access_key_id }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.r2_secret_access_key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          info_plist="$APP_PATH/Contents/Info.plist"
+          feed_url="$(/usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$info_plist" 2>/dev/null || true)"
+          public_key="$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$info_plist" 2>/dev/null || true)"
+
+          if [[ -z "$feed_url" || -z "$public_key" ]]; then
+            echo "Sparkle publishing requires SUFeedURL and SUPublicEDKey in the app's Info.plist." >&2
+            exit 1
+          fi
+
+          # The bucket is served at the feed host's root, so the URL path is the object key.
+          if [[ ! "$feed_url" =~ ^https://[^/?#]+/([^?#]+/)?([^/?#]+\.xml)$ ]]; then
+            echo "SUFeedURL must be an HTTPS URL to an .xml file without a query or fragment: $feed_url" >&2
+            exit 1
+          fi
+
+          object_prefix="${BASH_REMATCH[1]}"
+          feed_name="${BASH_REMATCH[2]}"
+          download_url_prefix="${feed_url%/*}/"
+
+          generate_appcast="$BUILD_ROOT/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast"
+          if [[ ! -x "$generate_appcast" ]]; then
+            echo "Sparkle's generate_appcast was not found. Add Sparkle to the app with Swift Package Manager." >&2
+            exit 1
+          fi
+
+          sparkle_dir="$BUILD_ROOT/sparkle"
+          archive_name="$(basename "$RELEASE_ASSET")"
+          rm -rf "${sparkle_dir:?}"
+          mkdir -p "$sparkle_dir"
+          cp "$RELEASE_ASSET" "$sparkle_dir/$archive_name"
+
+          if [[ -f "$RELEASE_NOTES_PATH" ]]; then
+            cp "$RELEASE_NOTES_PATH" "$sparkle_dir/${archive_name%.zip}.md"
+          fi
+
+          r2_endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com/$SPARKLE_R2_BUCKET"
+          empty_payload_sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+          # Read the current feed through the R2 API rather than the public URL, which may be cached.
+          http_status="$(
+            printf 'user = "%s:%s"\n' "$R2_ACCESS_KEY_ID" "$R2_SECRET_ACCESS_KEY" |
+              curl --config - \
+                --silent \
+                --show-error \
+                --aws-sigv4 "aws:amz:auto:s3" \
+                --header "x-amz-content-sha256: $empty_payload_sha256" \
+                --output "$sparkle_dir/$feed_name" \
+                --write-out '%{http_code}' \
+                "$r2_endpoint/$object_prefix$feed_name"
+          )"
+
+          case "$http_status" in
+            200)
+              ;;
+            404)
+              rm -f "${sparkle_dir:?}/${feed_name:?}"
+              echo "No existing Sparkle feed at $object_prefix$feed_name; creating it."
+              ;;
+            *)
+              echo "Could not read the existing Sparkle feed from R2 (HTTP $http_status)." >&2
+              exit 1
+              ;;
+          esac
+
+          generate_log="$RUNNER_TEMP/sparkle-generate-appcast.log"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" |
+            "$generate_appcast" \
+              --ed-key-file - \
+              --download-url-prefix "$download_url_prefix" \
+              --embed-release-notes \
+              --maximum-deltas 0 \
+              --maximum-versions 0 \
+              -o "$sparkle_dir/$feed_name" \
+              "$sparkle_dir" 2>&1 | tee "$generate_log"
+
+          # generate_appcast only warns about a key mismatch and skips unusable archives.
+          if grep -qE "does not match|^Skipped " "$generate_log"; then
+            echo "generate_appcast did not produce a signed update for $archive_name." >&2
+            exit 1
+          fi
+
+          python3 -I - "$sparkle_dir/$feed_name" "$CURRENT_PROJECT_VERSION" "$download_url_prefix$archive_name" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ElementTree
+
+          feed_path, build_version, archive_url = sys.argv[1:]
+          sparkle = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
+          items = [
+              item for item in ElementTree.parse(feed_path).iter("item")
+              if item.findtext(sparkle + "version") == build_version
+          ]
+          if len(items) != 1:
+              sys.exit(f"Expected one appcast item for build {build_version}, found {len(items)}.")
+
+          enclosure = items[0].find("enclosure")
+          if enclosure is None or enclosure.get("url") != archive_url or not enclosure.get(sparkle + "edSignature"):
+              sys.exit(f"The appcast item for build {build_version} is missing a signed enclosure for {archive_url}.")
+          PY
+
+          {
+            echo "SPARKLE_ARCHIVE_PATH=$sparkle_dir/$archive_name"
+            echo "SPARKLE_ARCHIVE_KEY=$object_prefix$archive_name"
+            echo "SPARKLE_FEED_PATH=$sparkle_dir/$feed_name"
+            echo "SPARKLE_FEED_KEY=$object_prefix$feed_name"
+            echo "SPARKLE_FEED_URL=$feed_url"
+          } >> "$GITHUB_ENV"
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -719,6 +883,44 @@ jobs:
             echo "- Notarization: \`$NOTARY_SUBMISSION_ID\`"
             echo "- Asset: \`$(basename "$RELEASE_ASSET")\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish Sparkle update
+        if: ${{ inputs.sparkle_r2_bucket != '' }}
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.r2_account_id }}
+          R2_ACCESS_KEY_ID: ${{ secrets.r2_access_key_id }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.r2_secret_access_key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          r2_endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com/$SPARKLE_R2_BUCKET"
+
+          upload_object() {
+            local file_path="$1"
+            local object_key="$2"
+            local content_type="$3"
+            local payload_sha256
+
+            payload_sha256="$(shasum -a 256 "$file_path" | awk '{ print $1 }')"
+            printf 'user = "%s:%s"\n' "$R2_ACCESS_KEY_ID" "$R2_SECRET_ACCESS_KEY" |
+              curl --config - \
+                --silent \
+                --show-error \
+                --fail-with-body \
+                --aws-sigv4 "aws:amz:auto:s3" \
+                --header "x-amz-content-sha256: $payload_sha256" \
+                --header "Content-Type: $content_type" \
+                --header "Cache-Control: no-cache" \
+                --upload-file "$file_path" \
+                "$r2_endpoint/$object_key" > /dev/null
+          }
+
+          # Upload the archive first so the feed never points at a missing file.
+          upload_object "$SPARKLE_ARCHIVE_PATH" "$SPARKLE_ARCHIVE_KEY" "application/zip"
+          upload_object "$SPARKLE_FEED_PATH" "$SPARKLE_FEED_KEY" "application/xml"
+
+          echo "- Sparkle feed: $SPARKLE_FEED_URL" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove temporary credentials
         if: ${{ always() }}
