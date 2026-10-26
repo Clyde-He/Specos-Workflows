@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.3.1
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.4.0
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
@@ -130,6 +130,31 @@ Configure it together with the release credentials:
 
 Use a fine-grained token limited to the package repositories with read-only
 Contents access.
+
+### Sparkle updates
+
+Apps that ship [Sparkle 2](https://sparkle-project.org) updates can publish
+each release to a Cloudflare R2 bucket by also setting:
+
+```yaml
+      sparkle_r2_bucket: specos-updates
+    secrets:
+      sparkle_private_key: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+      r2_account_id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+```
+
+The workflow reads `SUFeedURL` and `SUPublicEDKey` from the exported app,
+signs the notarized ZIP with `generate_appcast` from the app's resolved Sparkle
+package, adds it to the existing feed, and uploads the ZIP and then the feed.
+The bucket must be served at the root of the `SUFeedURL` host, so
+`https://updates.specos.design/needle/appcast.xml` is stored as
+`needle/appcast.xml`. The release notes file becomes the update's Markdown
+description.
+
+A missing credential, a private key that does not match `SUPublicEDKey`, or an
+unsigned feed item stops the job before the GitHub Release is published.
 
 ### Release contract
 
