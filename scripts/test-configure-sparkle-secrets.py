@@ -125,7 +125,7 @@ class ConfigureSparkleSecretsTests(unittest.TestCase):
         })
         keychain = json.loads((self.root / 'keychain.json').read_text())
         self.assertEqual(keychain['Specos Sparkle R2/secret-access-key'], SECRET)
-        self.assertEqual(keychain['Specos Sparkle R2/secret-access-key#label'], 'Sparkle R2 - Secret Access Key')
+        self.assertEqual(keychain['Specos Sparkle R2/secret-access-key#label'], 'Sparkle • Specos Update R2 • Secret Access Key')
         self.assertIn('<string>PUBLIC-design.specos.needle</string>', result.stdout)
         self.assertNotIn(SECRET, result.stdout + result.stderr)
         self.assertNotIn('PRIVATE-', result.stdout + result.stderr)

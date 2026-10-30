@@ -78,7 +78,7 @@ read_r2_value() {
 store_r2_value() {
   # security -i reads the command from stdin, which keeps the value out of the process list.
   printf 'add-generic-password -U -s "%s" -a "%s" -l "%s" -w "%s"\n' \
-    "$keychain_service" "$1" "Sparkle R2 - $3" "$2" |
+    "$keychain_service" "$1" "Sparkle • Specos Update R2 • $3" "$2" |
     security -i >/dev/null
 
   if [[ "$(read_r2_value "$1")" != "$2" ]]; then
@@ -163,7 +163,7 @@ Add the public key to the app's Info.plist:
 
 Back up the private key outside this Mac. It is stored in the login Keychain as
 "Private key for signing Sparkle updates" (account $bundle_id); you can rename it
-in Keychain Access, such as "Sparkle Update Key - <App>", as long as Where and
+in Keychain Access, such as "Sparkle • Update Key • <App>", as long as Where and
 Account stay unchanged. Export a copy for a password manager with:
 
     "$generate_keys" --account $bundle_id -x <path>
