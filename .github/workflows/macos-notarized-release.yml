@@ -35,7 +35,7 @@ on:
       runner:
         description: "GitHub-hosted macOS runner label"
         required: false
-        default: macos-26
+        default: xcode-27
         type: string
       xcode_path:
         description: "Optional Xcode.app path passed to xcode-select"
@@ -45,7 +45,7 @@ on:
       minimum_xcode_major:
         description: "Minimum accepted Xcode major version"
         required: false
-        default: 26
+        default: 27
         type: number
       allow_provisioning_updates:
         description: "Let Xcode create or download Developer ID provisioning profiles"

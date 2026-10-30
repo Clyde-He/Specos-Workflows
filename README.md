@@ -55,6 +55,13 @@ The reusable workflow checks out and releases the caller repository. It does not
 
 The caller must grant `contents: write`; a reusable workflow cannot elevate the caller's token permissions.
 
+The workflow builds on GitHub's `xcode-27` runner and requires Xcode 27, so a release is built with the macOS 27 SDK. That runner image is still a GitHub preview. A caller that must stay on Xcode 26 can set:
+
+```yaml
+      runner: macos-26
+      minimum_xcode_major: 26
+```
+
 Apps with capabilities that require Developer ID provisioning profiles, such
 as App Groups, should also set:
 
