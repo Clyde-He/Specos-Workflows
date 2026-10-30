@@ -164,6 +164,16 @@ description.
 A missing credential, a private key that does not match `SUPublicEDKey`, or an
 unsigned feed item stops the job before the GitHub Release is published.
 
+Configure the Sparkle key and R2 secrets for a caller with:
+
+```bash
+./scripts/configure-sparkle-secrets.sh Clyde-He/Example-App \
+  --bundle-id design.specos.example
+```
+
+The R2 token is entered once and reused from the login Keychain for later
+apps. See [docs/setup.md](docs/setup.md#sparkle-updates).
+
 ### Release contract
 
 - The archive scheme is shared and committed.
@@ -241,6 +251,7 @@ templates/
 scripts/
   new-macos-app.sh
   configure-release-secrets.sh
+  configure-sparkle-secrets.sh
 docs/
   setup.md
 ```
