@@ -145,7 +145,7 @@ Apps that ship [Sparkle 2](https://sparkle-project.org) updates can publish
 each release to a Cloudflare R2 bucket by also setting:
 
 ```yaml
-      sparkle_r2_bucket: specos-updates
+      sparkle_r2_bucket: specos-update
     secrets:
       sparkle_private_key: ${{ secrets.SPARKLE_PRIVATE_KEY }}
       r2_account_id: ${{ secrets.R2_ACCOUNT_ID }}
