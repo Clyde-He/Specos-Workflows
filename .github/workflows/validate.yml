@@ -49,7 +49,13 @@ jobs:
           test -f "$destination/AGENTS.md"
           test -f "$destination/.gitignore"
           test -f "$destination/.github/workflows/release.yml"
+          test -f "$destination/.github/workflows/ci.yml"
           test ! -e "$destination/.github/workflows/macos-notarized-release.yml"
+          test ! -e "$destination/.github/workflows/macos-ci.yml"
+
+          grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.0" \
+            "$destination/.github/workflows/ci.yml"
+          ! grep -q "__PROJECT_PATH__\|__SCHEME__" "$destination/.github/workflows/ci.yml"
 
           grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.4.0" \
             "$destination/.github/workflows/release.yml"

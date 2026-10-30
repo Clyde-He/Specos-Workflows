@@ -5,6 +5,7 @@ Shared automation and project scaffolding for Specos repositories.
 This repository currently provides:
 
 - A reusable GitHub Actions workflow for Developer ID signing, Apple notarization, and GitHub Releases.
+- A reusable GitHub Actions workflow that builds and tests a macOS app on each pull request.
 - A macOS app template with `AGENTS.md`, `.gitignore`, CI, release configuration, documentation, and setup scripts.
 
 The repository contains no certificates, App Store Connect private keys, or caller application source.
@@ -175,6 +176,45 @@ unsigned feed item stops the job before the GitHub Release is published.
 - Missing credentials, invalid metadata, an invalid signature, or rejected notarization stops publication.
 - `.github/release-notes.md` is used when present; otherwise GitHub-generated notes are used.
 
+## Reusable macOS CI
+
+An app repository keeps a thin caller workflow:
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.0
+    with:
+      project_path: Example App.xcodeproj
+      scheme: Example App
+```
+
+On each runner in `runners`, the workflow builds the Debug configuration and runs its tests, then builds the Release configuration, with warnings treated as errors and code signing off. By default it runs on `xcode-27` and `macos-26`, so code that needs the newest SDK must still build with the previous Xcode. Failed tests upload their result bundle as an artifact.
+
+| Input | Default | Purpose |
+|---|---|---|
+| `runners` | `["xcode-27", "macos-26"]` | JSON array of runner labels, one build per Xcode |
+| `test` | `true` | Run the scheme's tests in Debug |
+| `build_release` | `true` | Also build the Release configuration |
+| `warnings_as_errors` | `true` | Fail on Swift and Clang warnings |
+
+Pass `swift_package_token` under `secrets` when the app depends on private Swift packages. A repository that needs more than this adds its own jobs beside `build` in the same caller workflow.
+
 ## Create a macOS app repository
 
 Generate a new repository working tree from `templates/macos-app`:
@@ -194,6 +234,7 @@ The generator copies only the macOS app template, resolves its placeholders, and
 
 ```text
 .github/workflows/
+  macos-ci.yml
   macos-notarized-release.yml
 templates/
   macos-app/

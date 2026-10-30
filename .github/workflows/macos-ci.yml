@@ -1,0 +1,144 @@
+name: macOS CI
+
+on:
+  workflow_call:
+    inputs:
+      project_path:
+        description: "Path to the caller's .xcodeproj or .xcworkspace"
+        required: true
+        type: string
+      scheme:
+        description: "Shared Xcode scheme to build and test"
+        required: true
+        type: string
+      runners:
+        description: "JSON array of GitHub-hosted macOS runner labels, one build per Xcode"
+        required: false
+        default: '["xcode-27", "macos-26"]'
+        type: string
+      test:
+        description: "Run the scheme's tests in Debug"
+        required: false
+        default: true
+        type: boolean
+      build_release:
+        description: "Also build the Release configuration, which ships"
+        required: false
+        default: true
+        type: boolean
+      warnings_as_errors:
+        description: "Fail the build on Swift and Clang warnings"
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      swift_package_token:
+        description: "Optional token with read access to private Swift package repositories"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      # One Xcode failing must not hide whether the other passes.
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(inputs.runners) }}
+    env:
+      PROJECT_PATH: ${{ inputs.project_path }}
+      SCHEME: ${{ inputs.scheme }}
+      RUN_TESTS: ${{ inputs.test }}
+      BUILD_RELEASE: ${{ inputs.build_release }}
+      WARNINGS_AS_ERRORS: ${{ inputs.warnings_as_errors }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure private Swift package access
+        env:
+          SWIFT_PACKAGE_TOKEN: ${{ secrets.swift_package_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$SWIFT_PACKAGE_TOKEN" ]]; then
+            exit 0
+          fi
+
+          git_config_global="$RUNNER_TEMP/specos-ci.gitconfig"
+          GIT_CONFIG_GLOBAL="$git_config_global" git config --global \
+            url."https://x-access-token:${SWIFT_PACKAGE_TOKEN}@github.com/".insteadOf \
+            "https://github.com/"
+          echo "GIT_CONFIG_GLOBAL=$git_config_global" >> "$GITHUB_ENV"
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build and test
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "$PROJECT_PATH" in
+            *.xcodeproj)
+              container_flag="-project"
+              ;;
+            *.xcworkspace)
+              container_flag="-workspace"
+              ;;
+            *)
+              echo "project_path must end in .xcodeproj or .xcworkspace." >&2
+              exit 1
+              ;;
+          esac
+
+          settings=(CODE_SIGNING_ALLOWED=NO)
+          if [[ "$WARNINGS_AS_ERRORS" == "true" ]]; then
+            settings+=(SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES)
+          fi
+
+          actions=(build)
+          if [[ "$RUN_TESTS" == "true" ]]; then
+            actions+=(test)
+          fi
+
+          xcodebuild \
+            "$container_flag" "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination "platform=macOS" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/Tests.xcresult" \
+            "${settings[@]}" \
+            "${actions[@]}"
+
+          if [[ "$BUILD_RELEASE" == "true" ]]; then
+            xcodebuild \
+              "$container_flag" "$PROJECT_PATH" \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -destination "platform=macOS" \
+              -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+              "${settings[@]}" \
+              build
+          fi
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult-${{ matrix.runner }}
+          path: ${{ runner.temp }}/Tests.xcresult
+          if-no-files-found: ignore
+
+      - name: Remove temporary credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/specos-ci.gitconfig"
