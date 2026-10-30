@@ -39,7 +39,9 @@ if args == ['-i']:
     for line in sys.stdin:
         command = shlex.split(line)
         if command and command[0] == 'add-generic-password':
-            store[command[command.index('-s') + 1] + '/' + command[command.index('-a') + 1]] = command[command.index('-w') + 1]
+            item = command[command.index('-s') + 1] + '/' + command[command.index('-a') + 1]
+            store[item] = command[command.index('-w') + 1]
+            store[item + '#label'] = command[command.index('-l') + 1]
     store_path.write_text(json.dumps(store))
 elif args[:1] == ['find-generic-password']:
     value = store.get(args[args.index('-s') + 1] + '/' + args[args.index('-a') + 1])
@@ -123,6 +125,7 @@ class ConfigureSparkleSecretsTests(unittest.TestCase):
         })
         keychain = json.loads((self.root / 'keychain.json').read_text())
         self.assertEqual(keychain['Specos Sparkle R2/secret-access-key'], SECRET)
+        self.assertEqual(keychain['Specos Sparkle R2/secret-access-key#label'], 'Sparkle R2 - Secret Access Key')
         self.assertIn('<string>PUBLIC-design.specos.needle</string>', result.stdout)
         self.assertNotIn(SECRET, result.stdout + result.stderr)
         self.assertNotIn('PRIVATE-', result.stdout + result.stderr)

@@ -77,7 +77,8 @@ read_r2_value() {
 
 store_r2_value() {
   # security -i reads the command from stdin, which keeps the value out of the process list.
-  printf 'add-generic-password -U -s "%s" -a "%s" -w "%s"\n' "$keychain_service" "$1" "$2" |
+  printf 'add-generic-password -U -s "%s" -a "%s" -l "%s" -w "%s"\n' \
+    "$keychain_service" "$1" "Sparkle R2 - $3" "$2" |
     security -i >/dev/null
 
   if [[ "$(read_r2_value "$1")" != "$2" ]]; then
@@ -114,9 +115,9 @@ else
     exit 1
   fi
 
-  store_r2_value account-id "$r2_account_id"
-  store_r2_value access-key-id "$r2_access_key_id"
-  store_r2_value secret-access-key "$r2_secret_access_key"
+  store_r2_value account-id "$r2_account_id" "Account ID"
+  store_r2_value access-key-id "$r2_access_key_id" "Access Key ID"
+  store_r2_value secret-access-key "$r2_secret_access_key" "Secret Access Key"
 fi
 
 generate_keys="${SPARKLE_GENERATE_KEYS:-}"
@@ -161,8 +162,9 @@ Add the public key to the app's Info.plist:
     <string>$public_key</string>
 
 Back up the private key outside this Mac. It is stored in the login Keychain as
-"Private key for signing Sparkle updates" (account $bundle_id). Export a copy for
-a password manager with:
+"Private key for signing Sparkle updates" (account $bundle_id); you can rename it
+in Keychain Access, such as "Sparkle Update Key - <App>", as long as Where and
+Account stay unchanged. Export a copy for a password manager with:
 
     "$generate_keys" --account $bundle_id -x <path>
 EOF
