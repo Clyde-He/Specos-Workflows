@@ -194,9 +194,6 @@ An app repository keeps a thin caller workflow:
 name: CI
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
 
 permissions:
@@ -213,6 +210,8 @@ jobs:
       project_path: Example App.xcodeproj
       scheme: Example App
 ```
+
+It runs on pull requests only. Code reaches `main` through them, already tested, and the release commit that goes straight to `main` is built again by the release workflow, so a run on every push to `main` would repeat both builds on macOS runners.
 
 On each runner in `runners`, the workflow builds the Debug configuration and runs its tests, then builds the Release configuration, with code signing off. It then fails on any warning in the caller's own source files; warnings inside Swift package dependencies are ignored. By default it runs on `xcode-27` and `macos-26`, so code that needs the newest SDK must still build with the previous Xcode. Failed tests upload their result bundle as an artifact.
 
