@@ -34,6 +34,9 @@ jobs:
       - name: Test release credential setup
         run: python3 scripts/test-configure-release-secrets.py
 
+      - name: Test Sparkle credential setup
+        run: python3 scripts/test-configure-sparkle-secrets.py
+
       - name: Generate macOS app template
         shell: bash
         run: |
