@@ -15,42 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build
-    runs-on: xcode-27
-    env:
-      PROJECT_PATH: "__PROJECT_PATH__"
-      SCHEME: "__SCHEME__"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Show Xcode version
-        run: xcodebuild -version
-
-      - name: Build app
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          case "$PROJECT_PATH" in
-            *.xcodeproj)
-              container_flag="-project"
-              ;;
-            *.xcworkspace)
-              container_flag="-workspace"
-              ;;
-            *)
-              echo "PROJECT_PATH must end in .xcodeproj or .xcworkspace." >&2
-              exit 1
-              ;;
-          esac
-
-          xcodebuild \
-            "$container_flag" "$PROJECT_PATH" \
-            -scheme "$SCHEME" \
-            -configuration Debug \
-            -destination "platform=macOS" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.0
+    with:
+      project_path: "__PROJECT_PATH__"
+      scheme: "__SCHEME__"
