@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.0
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.1
     with:
       project_path: "__PROJECT_PATH__"
       scheme: "__SCHEME__"
