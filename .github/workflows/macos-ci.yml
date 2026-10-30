@@ -27,7 +27,7 @@ on:
         default: true
         type: boolean
       warnings_as_errors:
-        description: "Fail the build on Swift and Clang warnings"
+        description: "Fail on warnings in the caller's own source files; Swift package warnings are ignored"
         required: false
         default: true
         type: boolean
@@ -98,10 +98,9 @@ jobs:
               ;;
           esac
 
+          # Warnings are checked after the build instead of with *_TREAT_WARNINGS_AS_ERRORS, which also
+          # reaches remote Swift packages and conflicts with the -suppress-warnings Xcode gives them.
           settings=(CODE_SIGNING_ALLOWED=NO)
-          if [[ "$WARNINGS_AS_ERRORS" == "true" ]]; then
-            settings+=(SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES)
-          fi
 
           actions=(build)
           if [[ "$RUN_TESTS" == "true" ]]; then
@@ -125,8 +124,62 @@ jobs:
               -configuration Release \
               -destination "platform=macOS" \
               -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+              -resultBundlePath "$RUNNER_TEMP/Release.xcresult" \
               "${settings[@]}" \
               build
+          fi
+
+      - name: Check for warnings
+        if: ${{ inputs.warnings_as_errors }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          result_bundles=("$RUNNER_TEMP/Tests.xcresult")
+          if [[ "$BUILD_RELEASE" == "true" ]]; then
+            result_bundles+=("$RUNNER_TEMP/Release.xcresult")
+          fi
+
+          warnings_found=false
+          for result_bundle in "${result_bundles[@]}"; do
+            build_results="$RUNNER_TEMP/build-results.json"
+            xcrun xcresulttool get build-results --path "$result_bundle" > "$build_results"
+
+            if ! python3 -I - "$build_results" "$GITHUB_WORKSPACE" "$(basename "$result_bundle" .xcresult)" <<'PY'
+          import json
+          import sys
+          from urllib.parse import parse_qs, unquote, urlparse
+
+          results_path, workspace, label = sys.argv[1:]
+          workspace = workspace.rstrip("/") + "/"
+
+
+          def escape(value):
+              return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+          # Swift package checkouts live in DerivedData, outside the workspace, so only the caller's code counts.
+          own_warnings = []
+          for warning in json.load(open(results_path)).get("warnings", []):
+              location = urlparse(warning.get("sourceURL") or "")
+              path = unquote(location.path)
+              if path.startswith(workspace):
+                  line = parse_qs(location.fragment).get("StartingLineNumber", ["0"])[0]
+                  own_warnings.append((path[len(workspace):], int(line) + 1, warning.get("message", "")))
+
+          for path, line, message in own_warnings:
+              print(f"::error file={escape(path)},line={line}::{escape(message)}")
+
+          if own_warnings:
+              sys.exit(f"{label}: {len(own_warnings)} warning(s) in the app's own source files.")
+          PY
+            then
+              warnings_found=true
+            fi
+          done
+
+          if [[ "$warnings_found" == "true" ]]; then
+            exit 1
           fi
 
       - name: Upload test results

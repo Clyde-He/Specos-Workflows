@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.4.1
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.4.2
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
@@ -208,20 +208,20 @@ concurrency:
 
 jobs:
   build:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.1
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.2
     with:
       project_path: Example App.xcodeproj
       scheme: Example App
 ```
 
-On each runner in `runners`, the workflow builds the Debug configuration and runs its tests, then builds the Release configuration, with warnings treated as errors and code signing off. By default it runs on `xcode-27` and `macos-26`, so code that needs the newest SDK must still build with the previous Xcode. Failed tests upload their result bundle as an artifact.
+On each runner in `runners`, the workflow builds the Debug configuration and runs its tests, then builds the Release configuration, with code signing off. It then fails on any warning in the caller's own source files; warnings inside Swift package dependencies are ignored. By default it runs on `xcode-27` and `macos-26`, so code that needs the newest SDK must still build with the previous Xcode. Failed tests upload their result bundle as an artifact.
 
 | Input | Default | Purpose |
 |---|---|---|
 | `runners` | `["xcode-27", "macos-26"]` | JSON array of runner labels, one build per Xcode |
 | `test` | `true` | Run the scheme's tests in Debug |
 | `build_release` | `true` | Also build the Release configuration |
-| `warnings_as_errors` | `true` | Fail on Swift and Clang warnings |
+| `warnings_as_errors` | `true` | Fail on warnings in the caller's own source files |
 
 Pass `swift_package_token` under `secrets` when the app depends on private Swift packages. A repository that needs more than this adds its own jobs beside `build` in the same caller workflow.
 
