@@ -155,6 +155,9 @@ jobs:
           GIT_CONFIG_GLOBAL="$git_config_global" git config --global \
             url."https://x-access-token:${SWIFT_PACKAGE_TOKEN}@github.com/".insteadOf \
             "https://github.com/"
+          # Runner images enable the osxkeychain helper, which would store the token in the Keychain. SwiftPM
+          # then reads it for github.com binary artifacts and blocks on a Keychain access prompt.
+          GIT_CONFIG_GLOBAL="$git_config_global" git config --global credential.helper ""
           echo "GIT_CONFIG_GLOBAL=$git_config_global" >> "$GITHUB_ENV"
 
       - name: Validate release inputs and project metadata
