@@ -57,6 +57,16 @@ on:
         required: false
         default: false
         type: boolean
+      test:
+        description: "Run the scheme's tests before archiving when the scheme has test targets"
+        required: false
+        default: true
+        type: boolean
+      swift_test:
+        description: "Run swift test before archiving when the repository root has a Package.swift"
+        required: false
+        default: true
+        type: boolean
       release_notes_path:
         description: "Optional user-facing release notes file in the caller repository"
         required: false
@@ -131,6 +141,8 @@ jobs:
       MINIMUM_XCODE_MAJOR: ${{ inputs.minimum_xcode_major }}
       ALLOW_PROVISIONING_UPDATES: ${{ inputs.allow_provisioning_updates }}
       RELEASE_NOTES_PATH: ${{ inputs.release_notes_path }}
+      RUN_TESTS: ${{ inputs.test }}
+      RUN_SWIFT_TESTS: ${{ inputs.swift_test }}
       SPARKLE_R2_BUCKET: ${{ inputs.sparkle_r2_bucket }}
 
     steps:
@@ -312,6 +324,34 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -downloadComponent MetalToolchain
+
+      # main is not branch-protected, so the release tests the tag itself rather than trusting that a
+      # pull request already did, with the Xcode that builds the release.
+      - name: Run tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$RUN_TESTS" == "true" ]]; then
+            scheme_file="$(find . -path "*/xcshareddata/xcschemes/$SCHEME.xcscheme" -print -quit)"
+            # xcodebuild test fails on a scheme without tests, so such a scheme is left to the archive.
+            if grep -qE '<(TestableReference|TestPlanReference)([[:space:]>]|$)' "$scheme_file"; then
+              xcodebuild \
+                "$XCODE_CONTAINER_FLAG" "$PROJECT_PATH" \
+                -scheme "$SCHEME" \
+                -configuration Debug \
+                -destination "platform=macOS" \
+                -derivedDataPath "$RUNNER_TEMP/TestDerivedData" \
+                CODE_SIGNING_ALLOWED=NO \
+                test
+            else
+              echo "The $SCHEME scheme has no test targets; skipping its tests."
+            fi
+          fi
+
+          if [[ "$RUN_SWIFT_TESTS" == "true" && -f Package.swift ]]; then
+            swift test
+          fi
 
       - name: Import signing certificates
         env:

@@ -11,25 +11,20 @@ on:
         description: "Shared Xcode scheme to build and test"
         required: true
         type: string
-      ref:
-        description: "Optional Git ref to check out instead of the triggering commit, such as a release tag"
-        required: false
-        default: ""
-        type: string
       runners:
         description: "JSON array of GitHub-hosted macOS runner labels, one build per Xcode"
         required: false
         default: '["xcode-27", "macos-26"]'
         type: string
       test:
-        description: "Run the scheme's tests in Debug"
+        description: "Run the scheme's tests in Debug when the scheme has test targets"
         required: false
         default: true
         type: boolean
       swift_test:
-        description: "Also run swift test for the Package.swift at the repository root"
+        description: "Run swift test when the repository root has a Package.swift"
         required: false
-        default: false
+        default: true
         type: boolean
       build_release:
         description: "Also build the Release configuration, which ships"
@@ -69,8 +64,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Configure private Swift package access
         env:
@@ -119,7 +112,13 @@ jobs:
 
           actions=(build)
           if [[ "$RUN_TESTS" == "true" ]]; then
-            actions+=(test)
+            scheme_file="$(find . -path "*/xcshareddata/xcschemes/$SCHEME.xcscheme" -print -quit)"
+            # xcodebuild test fails on a scheme without tests, so such a scheme is only built.
+            if [[ -n "$scheme_file" ]] && grep -qE '<(TestableReference|TestPlanReference)([[:space:]>]|$)' "$scheme_file"; then
+              actions+=(test)
+            else
+              echo "The $SCHEME scheme has no test targets; skipping its tests."
+            fi
           fi
 
           xcodebuild \
@@ -198,7 +197,7 @@ jobs:
           fi
 
       - name: Run Swift package tests
-        if: ${{ inputs.swift_test }}
+        if: ${{ inputs.swift_test && hashFiles('Package.swift') != '' }}
         run: swift test
 
       - name: Upload test results
