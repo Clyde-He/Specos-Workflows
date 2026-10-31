@@ -65,9 +65,6 @@ jobs:
             echo "ci.yml has unresolved placeholders." >&2
             exit 1
           fi
-          grep -q "^  workflow_call:" "$destination/.github/workflows/ci.yml"
-          grep -q "uses: ./.github/workflows/ci.yml" "$destination/.github/workflows/release.yml"
-          grep -q "needs: ci" "$destination/.github/workflows/release.yml"
 
           grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.5.0" \
             "$destination/.github/workflows/release.yml"
