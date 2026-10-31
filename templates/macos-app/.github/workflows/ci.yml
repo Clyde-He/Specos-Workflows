@@ -2,6 +2,13 @@ name: CI
 
 on:
   pull_request:
+  # Release calls this workflow with the tag, so a release ships only code that passes CI.
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to test"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -12,7 +19,8 @@ concurrency:
 
 jobs:
   build:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.2
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.5.0
     with:
       project_path: "__PROJECT_PATH__"
       scheme: "__SCHEME__"
+      ref: ${{ inputs.ref }}

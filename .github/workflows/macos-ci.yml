@@ -11,6 +11,11 @@ on:
         description: "Shared Xcode scheme to build and test"
         required: true
         type: string
+      ref:
+        description: "Optional Git ref to check out instead of the triggering commit, such as a release tag"
+        required: false
+        default: ""
+        type: string
       runners:
         description: "JSON array of GitHub-hosted macOS runner labels, one build per Xcode"
         required: false
@@ -20,6 +25,11 @@ on:
         description: "Run the scheme's tests in Debug"
         required: false
         default: true
+        type: boolean
+      swift_test:
+        description: "Also run swift test for the Package.swift at the repository root"
+        required: false
+        default: false
         type: boolean
       build_release:
         description: "Also build the Release configuration, which ships"
@@ -59,6 +69,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Configure private Swift package access
         env:
@@ -184,6 +196,10 @@ jobs:
           if [[ "$warnings_found" == "true" ]]; then
             exit 1
           fi
+
+      - name: Run Swift package tests
+        if: ${{ inputs.swift_test }}
+        run: swift test
 
       - name: Upload test results
         if: failure()

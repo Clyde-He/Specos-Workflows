@@ -16,7 +16,7 @@ macOS app using a shared build, validation, signing, notarization, and GitHub Re
 
 ## Validation
 
-Pull requests and pushes to `main` compile the Debug configuration without code signing. Add project-specific unit and integration tests to `.github/workflows/ci.yml`.
+Each pull request, and each release before it publishes, builds the Debug and Release configurations without code signing, runs the scheme's tests, and fails on warnings in the app's own sources. Set `swift_test: true` in `.github/workflows/ci.yml` to also run a root `Package.swift`'s tests, or add project-specific jobs beside `build` there.
 
 ## Release
 

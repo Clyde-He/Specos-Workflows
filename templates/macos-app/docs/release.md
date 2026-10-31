@@ -28,7 +28,7 @@ git tag vX.Y.Z-build.N
 git push origin vX.Y.Z-build.N
 ```
 
-The workflow rejects tags that do not match `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. A successful run archives `__SCHEME__`, signs `__APP_NAME__.app` with Developer ID, submits it to Apple's notary service, staples the ticket, validates it with Gatekeeper, and uploads the notarized ZIP plus a SHA-256 checksum.
+The workflow first runs CI on the tag and publishes nothing if it fails. It rejects tags that do not match `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. A successful run archives `__SCHEME__`, signs `__APP_NAME__.app` with Developer ID, submits it to Apple's notary service, staples the ticket, validates it with Gatekeeper, and uploads the notarized ZIP plus a SHA-256 checksum.
 
 ## Retry
 

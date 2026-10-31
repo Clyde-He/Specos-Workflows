@@ -59,10 +59,16 @@ jobs:
           test ! -e "$destination/.github/workflows/macos-notarized-release.yml"
           test ! -e "$destination/.github/workflows/macos-ci.yml"
 
-          grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.2" \
+          grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.5.0" \
             "$destination/.github/workflows/ci.yml"
-          ! grep -q "__PROJECT_PATH__\|__SCHEME__" "$destination/.github/workflows/ci.yml"
+          if grep -q "__PROJECT_PATH__\|__SCHEME__" "$destination/.github/workflows/ci.yml"; then
+            echo "ci.yml has unresolved placeholders." >&2
+            exit 1
+          fi
+          grep -q "^  workflow_call:" "$destination/.github/workflows/ci.yml"
+          grep -q "uses: ./.github/workflows/ci.yml" "$destination/.github/workflows/release.yml"
+          grep -q "needs: ci" "$destination/.github/workflows/release.yml"
 
-          grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.4.2" \
+          grep -q "Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.5.0" \
             "$destination/.github/workflows/release.yml"
           grep -q "design.specos.example" "$destination/AGENTS.md"

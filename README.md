@@ -32,8 +32,16 @@ permissions:
   contents: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.4.2
+    needs: ci
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.5.0
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
@@ -53,6 +61,8 @@ jobs:
 ```
 
 The reusable workflow checks out and releases the caller repository. It does not copy or read anything under `templates/`.
+
+The `ci` job runs the caller's own [CI workflow](#reusable-macos-ci) on the release tag first, and `needs: ci` publishes nothing unless it passes. Pull requests already run CI, but `main` is not branch-protected, so this also catches code that reached `main` without one.
 
 The caller must grant `contents: write`; a reusable workflow cannot elevate the caller's token permissions.
 
@@ -185,7 +195,8 @@ apps. See [docs/setup.md](docs/setup.md#sparkle-updates).
 - Tags use `vMARKETING_VERSION-build.CURRENT_PROJECT_VERSION`.
 - The tag exists and points to the commit being built.
 - Missing credentials, invalid metadata, an invalid signature, or rejected notarization stops publication.
-- `.github/release-notes.md` is used when present; otherwise GitHub-generated notes are used.
+- The caller's CI passes on the release tag before the release job runs.
+- `.github/release-notes.md` is used when present; otherwise GitHub-generated notes are used. Its `## Installation` section appears only in the GitHub Release, not in the Sparkle update.
 
 ## Reusable macOS CI
 
@@ -196,6 +207,12 @@ name: CI
 
 on:
   pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to test"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -206,24 +223,41 @@ concurrency:
 
 jobs:
   build:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.4.2
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.5.0
     with:
       project_path: Example App.xcodeproj
       scheme: Example App
+      ref: ${{ inputs.ref }}
 ```
 
-It runs on pull requests only. Code reaches `main` through them, already tested, and the release commit that goes straight to `main` is built again by the release workflow, so a run on every push to `main` would repeat both builds on macOS runners.
+It runs on each pull request, and the release workflow calls it with the release tag before publishing. A run on every push to `main` would repeat both on macOS runners. On a pull request `inputs.ref` is empty, so the pull request's own commit is tested.
 
-On each runner in `runners`, the workflow builds the Debug configuration and runs its tests, then builds the Release configuration, with code signing off. It then fails on any warning in the caller's own source files; warnings inside Swift package dependencies are ignored. By default it runs on `xcode-27` and `macos-26`, so code that needs the newest SDK must still build with the previous Xcode. Failed tests upload their result bundle as an artifact.
+On each runner in `runners`, the workflow builds the Debug configuration and runs its tests, then builds the Release configuration, with code signing off. It then fails on any warning in the caller's own source files; warnings inside Swift package dependencies are ignored. With `swift_test`, it also runs `swift test` for a Swift package at the repository root with the same Xcode; that run is not checked for warnings. By default it runs on `xcode-27` and `macos-26`, so code that needs the newest SDK must still build with the previous Xcode. Failed tests upload their result bundle as an artifact.
 
 | Input | Default | Purpose |
 |---|---|---|
 | `runners` | `["xcode-27", "macos-26"]` | JSON array of runner labels, one build per Xcode |
+| `ref` | Triggering commit | Git ref to check out, such as the release tag |
 | `test` | `true` | Run the scheme's tests in Debug |
+| `swift_test` | `false` | Also run `swift test` for the `Package.swift` at the repository root |
 | `build_release` | `true` | Also build the Release configuration |
 | `warnings_as_errors` | `true` | Fail on warnings in the caller's own source files |
 
-Pass `swift_package_token` under `secrets` when the app depends on private Swift packages. A repository that needs more than this adds its own jobs beside `build` in the same caller workflow.
+Pass `swift_package_token` under `secrets` when the app depends on private Swift packages. Release calls the caller's CI workflow without secrets, so such a caller also declares the secret under `workflow_call` and the release workflow's `ci` job passes it:
+
+```yaml
+# ci.yml
+  workflow_call:
+    secrets:
+      SWIFT_PACKAGE_TOKEN:
+        required: false
+
+# release.yml, in the ci job
+    secrets:
+      SWIFT_PACKAGE_TOKEN: ${{ secrets.SWIFT_PACKAGE_TOKEN }}
+```
+
+A repository that needs more than this adds its own jobs beside `build` in the same caller workflow; the release runs them too.
 
 ## Create a macOS app repository
 

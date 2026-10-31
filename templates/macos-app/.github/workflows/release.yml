@@ -15,8 +15,16 @@ permissions:
   contents: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.4.2
+    needs: ci
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.5.0
     with:
       app_name: "__APP_NAME__"
       project_path: "__PROJECT_PATH__"
