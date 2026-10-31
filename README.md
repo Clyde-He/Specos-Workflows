@@ -159,7 +159,8 @@ package, adds it to the existing feed, and uploads the ZIP and then the feed.
 The bucket must be served at the root of the `SUFeedURL` host, so
 `https://updates.specos.design/needle/appcast.xml` is stored as
 `needle/appcast.xml`. The release notes file becomes the update's Markdown
-description.
+description, without its `## Installation` section: users updating from inside
+the app do not need download instructions, which stay in the GitHub Release.
 
 A missing credential, a private key that does not match `SUPublicEDKey`, or an
 unsigned feed item stops the job before the GitHub Release is published.

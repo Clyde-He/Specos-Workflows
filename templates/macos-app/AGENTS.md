@@ -38,6 +38,7 @@
 - Include only meaningful user-facing features, improvements, and fixes.
 - Do not mention internal refactors, file organization, CI implementation, or framework names unless they explain visible behavior.
 - Order sections as `## New`, `## Improvements`, `## Fixes`, then `## Installation`, omitting empty sections.
+- `## Installation` appears only in the GitHub Release; the in-app update description omits it, so the other sections must not refer to it.
 
 ## Project
 

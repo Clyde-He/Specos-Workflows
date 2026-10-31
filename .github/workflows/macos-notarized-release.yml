@@ -756,8 +756,26 @@ jobs:
           mkdir -p "$sparkle_dir"
           cp "$RELEASE_ASSET" "$sparkle_dir/$archive_name"
 
+          # Updating users already have the app, so the update omits the notes' download instructions.
           if [[ -f "$RELEASE_NOTES_PATH" ]]; then
-            cp "$RELEASE_NOTES_PATH" "$sparkle_dir/${archive_name%.zip}.md"
+            python3 -I - "$RELEASE_NOTES_PATH" "$sparkle_dir/${archive_name%.zip}.md" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          notes_path, description_path = sys.argv[1:]
+          kept = []
+          skipping = False
+          for line in Path(notes_path).read_text().splitlines():
+              if re.match(r"#{1,2}\s", line):
+                  skipping = re.fullmatch(r"##\s+installation\s*", line, re.IGNORECASE) is not None
+              if not skipping:
+                  kept.append(line)
+
+          description = "\n".join(kept).strip()
+          if description:
+              Path(description_path).write_text(description + "\n")
+          PY
           fi
 
           r2_endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com/$SPARKLE_R2_BUCKET"
