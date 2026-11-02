@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.5.0
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.6.0
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
@@ -199,6 +199,9 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
 
 permissions:
   contents: read
@@ -209,19 +212,19 @@ concurrency:
 
 jobs:
   build:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.5.0
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.6.0
     with:
       project_path: Example App.xcodeproj
       scheme: Example App
 ```
 
-It runs on pull requests only. Code reaches `main` through them, already tested, and the release commit that goes straight to `main` is built again by the release workflow, so a run on every push to `main` would repeat both builds on macOS runners.
+It runs on pull requests that change more than Markdown files and `docs/`. The release workflow builds and tests the tag again before publishing, so a run on every push to `main` would repeat that work on macOS runners.
 
-On each runner in `runners`, the workflow builds the Debug configuration and runs its tests if the scheme has test targets, then builds the Release configuration, with code signing off. If the repository root has a `Package.swift`, it also runs `swift test` with the same Xcode; that run is not checked for warnings. It then fails on any warning in the caller's own source files; warnings inside Swift package dependencies are ignored. By default it runs on `xcode-27` and `macos-26`, so code that needs the newest SDK must still build with the previous Xcode. Failed tests upload their result bundle as an artifact.
+On each runner in `runners`, the workflow builds the Debug configuration and runs its tests if the scheme has test targets, then builds the Release configuration, with code signing off. If the repository root has a `Package.swift`, it also runs `swift test` with the same Xcode; that run is not checked for warnings. It then fails on any warning in the caller's own source files; warnings inside Swift package dependencies are ignored. By default it runs on `xcode-27` only, the Xcode that builds releases. Add `macos-26` to `runners` only if the app must still build with Xcode 26; assets that need Xcode 27, such as an Icon Composer 27 `.icon`, fail there with an `actool` exception. Swift package resolution runs in its own step with a 10-minute timeout, so a hung resolution fails early. Failed tests upload their result bundle as an artifact.
 
 | Input | Default | Purpose |
 |---|---|---|
-| `runners` | `["xcode-27", "macos-26"]` | JSON array of runner labels, one build per Xcode |
+| `runners` | `["xcode-27"]` | JSON array of runner labels, one build per Xcode |
 | `test` | `true` | Run the scheme's tests in Debug when it has test targets |
 | `swift_test` | `true` | Run `swift test` when the repository root has a `Package.swift` |
 | `build_release` | `true` | Also build the Release configuration |
