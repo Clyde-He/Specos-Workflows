@@ -16,7 +16,7 @@ macOS app using a shared build, validation, signing, notarization, and GitHub Re
 
 ## Validation
 
-Each pull request builds the Debug and Release configurations without code signing on Xcode 27 and Xcode 26, and fails on warnings in the app's own sources. It runs the scheme's tests once the scheme has test targets, and `swift test` for a `Package.swift` at the repository root. A release runs the same tests on its tag before archiving. Add project-specific jobs beside `build` in `.github/workflows/ci.yml`.
+Each pull request that changes more than documentation builds the Debug and Release configurations without code signing on Xcode 27, and fails on warnings in the app's own sources. It runs the scheme's tests once the scheme has test targets, and `swift test` for a `Package.swift` at the repository root. A release runs the same tests on its tag before archiving. Add project-specific jobs beside `build` in `.github/workflows/ci.yml`.
 
 ## Release
 

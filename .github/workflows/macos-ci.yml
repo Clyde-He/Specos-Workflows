@@ -12,9 +12,9 @@ on:
         required: true
         type: string
       runners:
-        description: "JSON array of GitHub-hosted macOS runner labels, one build per Xcode"
+        description: "JSON array of GitHub-hosted macOS runner labels, one build per Xcode; add macos-26 only if the app must still build with Xcode 26"
         required: false
-        default: '["xcode-27", "macos-26"]'
+        default: '["xcode-27"]'
         type: string
       test:
         description: "Run the scheme's tests in Debug when the scheme has test targets"
@@ -88,7 +88,9 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
-      - name: Build and test
+      # Resolution has hung on interactive prompts before, so it fails fast instead of using the job's timeout.
+      - name: Resolve Swift packages
+        timeout-minutes: 10
         shell: bash
         run: |
           set -euo pipefail
@@ -106,6 +108,19 @@ jobs:
               ;;
           esac
 
+          echo "XCODE_CONTAINER_FLAG=$container_flag" >> "$GITHUB_ENV"
+
+          xcodebuild \
+            "$container_flag" "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -resolvePackageDependencies
+
+      - name: Build and test
+        shell: bash
+        run: |
+          set -euo pipefail
+
           # Warnings are checked after the build instead of with *_TREAT_WARNINGS_AS_ERRORS, which also
           # reaches remote Swift packages and conflicts with the -suppress-warnings Xcode gives them.
           settings=(CODE_SIGNING_ALLOWED=NO)
@@ -122,7 +137,7 @@ jobs:
           fi
 
           xcodebuild \
-            "$container_flag" "$PROJECT_PATH" \
+            "$XCODE_CONTAINER_FLAG" "$PROJECT_PATH" \
             -scheme "$SCHEME" \
             -configuration Debug \
             -destination "platform=macOS" \
@@ -133,7 +148,7 @@ jobs:
 
           if [[ "$BUILD_RELEASE" == "true" ]]; then
             xcodebuild \
-              "$container_flag" "$PROJECT_PATH" \
+              "$XCODE_CONTAINER_FLAG" "$PROJECT_PATH" \
               -scheme "$SCHEME" \
               -configuration Release \
               -destination "platform=macOS" \
