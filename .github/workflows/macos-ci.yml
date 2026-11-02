@@ -90,7 +90,7 @@ jobs:
 
       # Resolution has hung on interactive prompts before, so it fails fast instead of using the job's timeout.
       - name: Resolve Swift packages
-        timeout-minutes: 10
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
