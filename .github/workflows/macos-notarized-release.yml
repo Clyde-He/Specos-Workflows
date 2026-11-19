@@ -72,6 +72,11 @@ on:
         required: false
         default: .github/release-notes.md
         type: string
+      setup_script:
+        description: "Optional executable script, relative to the repository root, that prepares untracked build inputs before testing and archiving"
+        required: false
+        default: ""
+        type: string
       sparkle_r2_bucket:
         description: "Optional Cloudflare R2 bucket served at the root of the app's SUFeedURL host; when set, publishes the release to the Sparkle feed"
         required: false
@@ -324,6 +329,32 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -downloadComponent MetalToolchain
+
+      # Some apps need files that are not in git, such as downloaded frameworks, before Xcode can build them.
+      - name: Run setup script
+        if: ${{ inputs.setup_script != '' }}
+        timeout-minutes: 15
+        env:
+          # Lets the script download assets from the caller repository's own releases with gh.
+          GH_TOKEN: ${{ github.token }}
+          SETUP_SCRIPT: ${{ inputs.setup_script }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "$SETUP_SCRIPT" in
+            /*|../*|*/../*)
+              echo "setup_script must be a path inside the repository: $SETUP_SCRIPT" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ ! -f "$SETUP_SCRIPT" || ! -x "$SETUP_SCRIPT" ]]; then
+            echo "setup_script must be an executable file in the repository: $SETUP_SCRIPT" >&2
+            exit 1
+          fi
+
+          "./$SETUP_SCRIPT"
 
       # main is not branch-protected, so the release tests the tag itself rather than trusting that a
       # pull request already did, with the Xcode that builds the release.
