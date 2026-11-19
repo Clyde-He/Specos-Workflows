@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   release:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.6.0
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-notarized-release.yml@v1.7.0
     with:
       app_name: Example App
       project_path: Example App.xcodeproj
@@ -77,6 +77,14 @@ development-signed archive and the App Store Connect authentication key to let
 Xcode create or download the required profiles. Xcode exports that archive with
 the Developer ID identity. Callers without those capabilities keep the default
 manual-signing path.
+
+Apps that need build inputs that are not in git, such as a framework downloaded from one of the repository's own releases, can set:
+
+```yaml
+      setup_script: scripts/ci-setup.sh
+```
+
+The workflow runs that executable script from the repository root after selecting Xcode and before testing and archiving, with `GH_TOKEN` set to the job's token so `gh release download` can read the caller repository's private releases. The token carries the caller's `contents: write` permission. A failing script publishes nothing, so a script that has a fallback, such as a public build without some feature, should fail in CI instead of shipping it.
 
 Apps that compile Metal source on runner images where the optional toolchain is
 not preinstalled should also set:
@@ -212,7 +220,7 @@ concurrency:
 
 jobs:
   build:
-    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.6.0
+    uses: Clyde-He/Specos-Workflows/.github/workflows/macos-ci.yml@v1.7.0
     with:
       project_path: Example App.xcodeproj
       scheme: Example App
@@ -229,6 +237,7 @@ On each runner in `runners`, the workflow builds the Debug configuration and run
 | `swift_test` | `true` | Run `swift test` when the repository root has a `Package.swift` |
 | `build_release` | `true` | Also build the Release configuration |
 | `warnings_as_errors` | `true` | Fail on warnings in the caller's own source files |
+| `setup_script` | none | Executable script, relative to the repository root, that prepares untracked build inputs; runs before package resolution with `GH_TOKEN` set |
 
 Pass `swift_package_token` under `secrets` when the app depends on private Swift packages. A repository that needs more than this adds its own jobs beside `build` in the same caller workflow.
 
